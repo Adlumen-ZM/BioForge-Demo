@@ -167,18 +167,48 @@ class BusinessDBWriter:
     def write_paper_record(self, parsed: dict, run_id: str) -> tuple[bool, str | None]:
         """将主表字段 INSERT 到 paper_record_v01_min，同时写入 extraction_run_id。
 
+        写入前执行三层防护，任意一层不通过即提前返回 (False, 错误描述)，不执行 INSERT：
+          1. 字段校验：调用 validate_record() 检查枚举值、必填字段、ID 格式
+          2. 主键检查：paper_id 不得重复（PRIMARY KEY）
+          3. 唯一键检查：record_id 不得重复（UNIQUE NOT NULL）
+
         run_id 由调用方从 TraceLogger.get_run_id() 获取后传入，是跨库溯源的唯一链接。
         summary_functions 若为 list，自动序列化为分号字符串再写入。
 
-        成功返回 (True, None)；数据库异常返回 (False, 错误描述)。
+        成功返回 (True, None)；任意检查失败或数据库异常返回 (False, 错误描述)。
         """
-        # summary_functions：将 JSON list 序列化为分号字符串（SQLite 无原生 list 类型）
-        funcs = parsed['summary_functions']
-        if isinstance(funcs, list):
-            funcs = ';'.join(funcs)
+        # ── 1. 字段校验：枚举值 / 必填字段 / ID 格式 ─────────────────────
+        # 在任何数据库操作之前执行，拦截不合规数据，避免脏数据入库
+        ok, err = self.validate_record(parsed)
+        if not ok:
+            return False, f"写入前字段校验失败：{err}"
 
         try:
             conn = self._connect()
+
+            # ── 2. 主键重复检查：paper_id 不得已存在 ─────────────────────
+            # 提前查询比依赖数据库抛 IntegrityError 更清晰，错误信息更具可读性
+            if conn.execute(
+                'SELECT 1 FROM paper_record_v01_min WHERE paper_id = ?',
+                (parsed['paper_id'],)
+            ).fetchone():
+                conn.close()
+                return False, f"paper_id '{parsed['paper_id']}' 已存在，拒绝重复写入"
+
+            # ── 3. 唯一键重复检查：record_id 不得已存在 ──────────────────
+            if conn.execute(
+                'SELECT 1 FROM paper_record_v01_min WHERE record_id = ?',
+                (parsed['record_id'],)
+            ).fetchone():
+                conn.close()
+                return False, f"record_id '{parsed['record_id']}' 已存在，拒绝重复写入"
+
+            # ── 4. 执行写入 ───────────────────────────────────────────────
+            # summary_functions：将 JSON list 序列化为分号字符串（SQLite 无原生 list 类型）
+            funcs = parsed['summary_functions']
+            if isinstance(funcs, list):
+                funcs = ';'.join(funcs)
+
             conn.execute(
                 """INSERT INTO paper_record_v01_min
                    (paper_id, record_id, extraction_run_id,
@@ -207,13 +237,52 @@ class BusinessDBWriter:
     def write_fae_records(self, fae_list: list, record_id: str) -> tuple[bool, str | None]:
         """批量 INSERT function_assay_evidence_v01_min，将所有 FAE 条目一次性写入。
 
-        使用 executemany 保证原子性：全部成功才提交，任意一条失败则全部回滚。
+        写入前执行两层防护，任意一层不通过即提前返回 (False, 错误描述)，不执行 INSERT：
+          1. 字段校验：逐条检查 FAE 的必填字段与枚举值
+          2. 主键检查：每条 fae_id 不得重复（PRIMARY KEY）
+
+        使用 executemany 保证原子性：全部 FAE 成功才提交，任意一条失败则全部回滚。
         record_id 由调用方传入，与主表记录关联。
 
-        成功返回 (True, None)；数据库异常返回 (False, 错误描述)。
+        成功返回 (True, None)；任意检查失败或数据库异常返回 (False, 错误描述)。
         """
+        # 空列表是合法输入（论文可能没有细粒度实验证据），直接视为成功
+        if not fae_list:
+            return True, None
+
         try:
             conn = self._connect()
+
+            for i, fae in enumerate(fae_list):
+
+                # ── 1. 字段校验：必填字段与枚举值 ────────────────────────
+                for field in _REQUIRED_FAE:
+                    if fae.get(field) is None:
+                        conn.close()
+                        return False, f"FAE[{i}] 必填字段缺失或为 null：'{field}'"
+                if fae['function_label'] not in _FUNCTIONS:
+                    conn.close()
+                    return False, f"FAE[{i}] function_label 值不合法：'{fae['function_label']}'"
+                if fae['evidence_level'] not in _EVIDENCE_LEVEL:
+                    conn.close()
+                    return False, f"FAE[{i}] evidence_level 值不合法：'{fae['evidence_level']}'"
+                if fae['assay_category'] not in _ASSAY_CATEGORY:
+                    conn.close()
+                    return False, f"FAE[{i}] assay_category 值不合法：'{fae['assay_category']}'"
+                if fae['trace_status'] not in _TRACE_STATUS:
+                    conn.close()
+                    return False, f"FAE[{i}] trace_status 值不合法：'{fae['trace_status']}'"
+
+                # ── 2. 主键重复检查：fae_id 不得已存在 ───────────────────
+                if conn.execute(
+                    'SELECT 1 FROM function_assay_evidence_v01_min WHERE fae_id = ?',
+                    (fae['fae_id'],)
+                ).fetchone():
+                    conn.close()
+                    return False, f"FAE[{i}] fae_id '{fae['fae_id']}' 已存在，拒绝重复写入"
+
+            # ── 3. 全部校验通过，执行批量写入 ────────────────────────────
+            # executemany 原子性保证：任意一条失败则整批回滚，不产生部分写入的脏数据
             conn.executemany(
                 """INSERT INTO function_assay_evidence_v01_min
                    (fae_id, record_id, function_label, evidence_level, assay_category,
