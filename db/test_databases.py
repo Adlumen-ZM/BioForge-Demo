@@ -1015,6 +1015,254 @@ class TestTraceLoggerGetRunId(_DBTestBase):
 
 
 # =============================================================================
+# 12. BusinessDBWriter 查询方法测试
+# =============================================================================
+
+class TestBusinessDBWriterQuery(_DBTestBase):
+    """测试 BusinessDBWriter 的四个查询方法：
+    get_paper_record_by_paper_id / get_paper_record_by_record_id /
+    get_fae_record_by_fae_id / get_fae_records_by_record_id
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._init_biz()
+        self.writer = self._make_writer()
+        # 预先写入一条主表记录和 2 条 FAE 子记录，供各查询测试使用
+        self.data = _valid_parsed(fae_count=2)
+        self.writer.write_paper_record(self.data, run_id='run_query_001')
+        self.writer.write_fae_records(self.data['fae_records'], record_id='P000001-R01')
+
+    # ── get_paper_record_by_paper_id ────────────────────────────────────
+
+    def test_get_paper_record_by_paper_id_found(self):
+        """按已存在的 paper_id 查询，应返回 (dict, None)，dict 包含所有主表字段。
+        summary_functions 应已从分号字符串反序列化为 list，与写入前的格式一致。
+        """
+        record, err = self.writer.get_paper_record_by_paper_id('P000001')
+        self.assertIsNotNone(record)
+        self.assertIsNone(err)
+        # 验证关键字段值正确
+        self.assertEqual(record['paper_id'], 'P000001')
+        self.assertEqual(record['doi'], '10.1234/test.2023')
+        self.assertEqual(record['extraction_run_id'], 'run_query_001')
+        # 验证 summary_functions 已反序列化为 list
+        self.assertIsInstance(record['summary_functions'], list)
+        self.assertIn('adsorption', record['summary_functions'])
+
+    def test_get_paper_record_by_paper_id_not_found(self):
+        """按不存在的 paper_id 查询，应返回 (None, None)，不报错。"""
+        record, err = self.writer.get_paper_record_by_paper_id('P999999')
+        self.assertIsNone(record)
+        self.assertIsNone(err)
+
+    def test_get_paper_record_by_paper_id_db_error(self):
+        """数据库异常时，应返回 (None, 错误描述)，不抛出未捕获异常。"""
+        with patch.object(self.writer, '_connect', side_effect=sqlite3.Error('read error')):
+            record, err = self.writer.get_paper_record_by_paper_id('P000001')
+        self.assertIsNone(record)
+        self.assertIsNotNone(err)
+        self.assertIn('read error', err)
+
+    # ── get_paper_record_by_record_id ───────────────────────────────────
+
+    def test_get_paper_record_by_record_id_found(self):
+        """按已存在的 record_id（UNIQUE 字段）查询，应返回正确的主表记录。"""
+        record, err = self.writer.get_paper_record_by_record_id('P000001-R01')
+        self.assertIsNotNone(record)
+        self.assertIsNone(err)
+        self.assertEqual(record['record_id'], 'P000001-R01')
+        self.assertEqual(record['paper_id'], 'P000001')
+
+    def test_get_paper_record_by_record_id_not_found(self):
+        """按不存在的 record_id 查询，应返回 (None, None)。"""
+        record, err = self.writer.get_paper_record_by_record_id('P000001-R99')
+        self.assertIsNone(record)
+        self.assertIsNone(err)
+
+    def test_get_paper_record_by_record_id_db_error(self):
+        """数据库异常时，应返回 (None, 错误描述)。"""
+        with patch.object(self.writer, '_connect', side_effect=sqlite3.Error('lock')):
+            record, err = self.writer.get_paper_record_by_record_id('P000001-R01')
+        self.assertIsNone(record)
+        self.assertIsNotNone(err)
+
+    # ── get_fae_record_by_fae_id ────────────────────────────────────────
+
+    def test_get_fae_record_by_fae_id_found(self):
+        """按已存在的 fae_id（主键）查询，应返回正确的 FAE 子记录。"""
+        target_fae_id = self.data['fae_records'][0]['fae_id']
+        fae, err = self.writer.get_fae_record_by_fae_id(target_fae_id)
+        self.assertIsNotNone(fae)
+        self.assertIsNone(err)
+        self.assertEqual(fae['fae_id'], target_fae_id)
+        self.assertEqual(fae['record_id'], 'P000001-R01')
+        self.assertEqual(fae['function_label'], 'adsorption')
+
+    def test_get_fae_record_by_fae_id_not_found(self):
+        """按不存在的 fae_id 查询，应返回 (None, None)。"""
+        fae, err = self.writer.get_fae_record_by_fae_id('P000001-R01-FAE99')
+        self.assertIsNone(fae)
+        self.assertIsNone(err)
+
+    def test_get_fae_record_by_fae_id_db_error(self):
+        """数据库异常时，应返回 (None, 错误描述)。"""
+        with patch.object(self.writer, '_connect', side_effect=sqlite3.Error('io error')):
+            fae, err = self.writer.get_fae_record_by_fae_id('P000001-R01-FAE01')
+        self.assertIsNone(fae)
+        self.assertIsNotNone(err)
+
+    # ── get_fae_records_by_record_id ────────────────────────────────────
+
+    def test_get_fae_records_by_record_id_returns_all(self):
+        """按 record_id 查询应返回该对象下的全部 FAE 子记录，按 fae_id 升序排列。"""
+        fae_list, err = self.writer.get_fae_records_by_record_id('P000001-R01')
+        self.assertIsNone(err)
+        # 写入了 2 条，应全部返回
+        self.assertEqual(len(fae_list), 2)
+        # 验证排序：fae_id 应升序
+        self.assertLessEqual(fae_list[0]['fae_id'], fae_list[1]['fae_id'])
+
+    def test_get_fae_records_by_record_id_empty(self):
+        """record_id 存在但无对应 FAE 记录时，应返回空列表而非报错。
+        此场景合法（主表记录刚写入、FAE 尚未写入时可能发生）。
+        """
+        # 写入另一条主表记录，但不写 FAE
+        data2 = _valid_parsed(paper_id='P000002', record_id='P000002-R01', fae_count=0)
+        self.writer.write_paper_record(data2, run_id='run_query_002')
+        fae_list, err = self.writer.get_fae_records_by_record_id('P000002-R01')
+        self.assertIsNone(err)
+        self.assertEqual(fae_list, [])
+
+    def test_get_fae_records_by_record_id_not_found(self):
+        """完全不存在的 record_id 查询，同样返回空列表而非报错。"""
+        fae_list, err = self.writer.get_fae_records_by_record_id('P999999-R01')
+        self.assertIsNone(err)
+        self.assertEqual(fae_list, [])
+
+    def test_get_fae_records_by_record_id_db_error(self):
+        """数据库异常时，应返回 ([], 错误描述)。"""
+        with patch.object(self.writer, '_connect', side_effect=sqlite3.Error('timeout')):
+            fae_list, err = self.writer.get_fae_records_by_record_id('P000001-R01')
+        self.assertEqual(fae_list, [])
+        self.assertIsNotNone(err)
+
+
+# =============================================================================
+# 13. TraceLogger 查询方法测试
+# =============================================================================
+
+class TestTraceLoggerQuery(_DBTestBase):
+    """测试 TraceLogger 的三个查询方法：
+    get_run / get_step_by_step_id / get_steps
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._init_trace()
+        self.logger = self._make_logger()
+        # 预先插入 2 条 step 记录供查询测试使用
+        self.step_id_1, _ = self.logger.insert_step(
+            prompt_system='sys', prompt_user='user1', raw_response='{}',
+            input_tokens=800, output_tokens=200, model_name='gpt-4o',
+            called_at=_iso(0), response_at=_iso(1),
+        )
+        self.step_id_2, _ = self.logger.insert_step(
+            prompt_system='sys', prompt_user='user2', raw_response='{"repair": true}',
+            input_tokens=400, output_tokens=100, model_name='gpt-4o',
+            called_at=_iso(2), response_at=_iso(3),
+        )
+
+    # ── get_run ─────────────────────────────────────────────────────────
+
+    def test_get_run_returns_current_run(self):
+        """get_run() 应返回当前 run 的完整 extraction_runs 记录，
+        包含 __init__ 时写入的配置字段和初始状态。
+        """
+        run, err = self.logger.get_run()
+        self.assertIsNotNone(run)
+        self.assertIsNone(err)
+        self.assertEqual(run['run_id'], self.logger.get_run_id())
+        self.assertEqual(run['paper_id'], 'P000001')
+        self.assertEqual(run['model_name'], 'gpt-4o')
+        self.assertEqual(run['run_status'], 'running')
+
+    def test_get_run_after_finalize_reflects_final_state(self):
+        """finalize() 完成后调用 get_run()，应能读到最终状态（run_status、token 汇总等）。
+        验证查询能正确反映写入后的数据库状态。
+        """
+        self.logger.finalize('success')
+        run, err = self.logger.get_run()
+        self.assertIsNone(err)
+        self.assertEqual(run['run_status'], 'success')
+        # token 汇总应已聚合（800+400=1200 input，200+100=300 output）
+        self.assertEqual(run['total_input_tokens'], 1200)
+        self.assertEqual(run['total_output_tokens'], 300)
+        self.assertEqual(run['total_tokens'], 1500)
+
+    def test_get_run_db_error(self):
+        """数据库异常时，get_run 应返回 (None, 错误描述)。"""
+        with patch.object(self.logger, '_connect', side_effect=sqlite3.Error('connection lost')):
+            run, err = self.logger.get_run()
+        self.assertIsNone(run)
+        self.assertIsNotNone(err)
+
+    # ── get_step_by_step_id ─────────────────────────────────────────────
+
+    def test_get_step_by_step_id_found(self):
+        """按已存在的 step_id（主键）查询，应返回正确的 trace_steps 记录。"""
+        step, err = self.logger.get_step_by_step_id(self.step_id_1)
+        self.assertIsNotNone(step)
+        self.assertIsNone(err)
+        self.assertEqual(step['step_id'], self.step_id_1)
+        self.assertEqual(step['step_index'], 1)
+        self.assertEqual(step['input_tokens'], 800)
+        self.assertEqual(step['prompt_user'], 'user1')
+
+    def test_get_step_by_step_id_not_found(self):
+        """按不存在的 step_id 查询，应返回 (None, None)，不报错。"""
+        step, err = self.logger.get_step_by_step_id('run_fake_step_99')
+        self.assertIsNone(step)
+        self.assertIsNone(err)
+
+    def test_get_step_by_step_id_db_error(self):
+        """数据库异常时，应返回 (None, 错误描述)。"""
+        with patch.object(self.logger, '_connect', side_effect=sqlite3.Error('disk error')):
+            step, err = self.logger.get_step_by_step_id(self.step_id_1)
+        self.assertIsNone(step)
+        self.assertIsNotNone(err)
+
+    # ── get_steps ───────────────────────────────────────────────────────
+
+    def test_get_steps_returns_all_in_order(self):
+        """get_steps() 应返回当前 run 下的全部 step，按 step_index 升序排列。"""
+        steps, err = self.logger.get_steps()
+        self.assertIsNone(err)
+        self.assertEqual(len(steps), 2)
+        # 验证排序：step_index 应升序
+        self.assertEqual(steps[0]['step_index'], 1)
+        self.assertEqual(steps[1]['step_index'], 2)
+        # 验证内容正确
+        self.assertEqual(steps[0]['step_id'], self.step_id_1)
+        self.assertEqual(steps[1]['step_id'], self.step_id_2)
+
+    def test_get_steps_empty_when_no_steps(self):
+        """没有插入任何 step 时，get_steps() 应返回空列表而非报错。"""
+        # 创建一个全新的 logger，没有任何 step
+        fresh_logger = self._make_logger(paper_id='P000002')
+        steps, err = fresh_logger.get_steps()
+        self.assertIsNone(err)
+        self.assertEqual(steps, [])
+
+    def test_get_steps_db_error(self):
+        """数据库异常时，应返回 ([], 错误描述)。"""
+        with patch.object(self.logger, '_connect', side_effect=sqlite3.Error('timeout')):
+            steps, err = self.logger.get_steps()
+        self.assertEqual(steps, [])
+        self.assertIsNotNone(err)
+
+
+# =============================================================================
 # 入口
 # =============================================================================
 

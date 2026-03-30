@@ -355,6 +355,107 @@ class BusinessDBWriter:
             return 'failed', f'完整性检查时数据库异常：{e}'
 
     # ------------------------------------------------------------------
+    # 查询方法
+    # ------------------------------------------------------------------
+
+    def get_paper_record_by_paper_id(self, paper_id: str) -> tuple[dict | None, str | None]:
+        """按 paper_id（主键）查询主表记录。
+
+        paper_id 是论文级别的唯一标识，一次查询对应最多一条记录。
+        summary_functions 在返回时自动反序列化为 list（写入时为分号字符串）。
+
+        返回 (record_dict, None) 表示找到；(None, None) 表示不存在；(None, 错误描述) 表示异常。
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row  # 使结果行可按列名访问
+            row = conn.execute(
+                'SELECT * FROM paper_record_v01_min WHERE paper_id = ?',
+                (paper_id,)
+            ).fetchone()
+            conn.close()
+            if row is None:
+                return None, None
+            return self._paper_row_to_dict(row), None
+        except sqlite3.Error as e:
+            return None, f"查询 paper_record（paper_id={paper_id}）失败：{e}"
+
+    def get_paper_record_by_record_id(self, record_id: str) -> tuple[dict | None, str | None]:
+        """按 record_id（UNIQUE 字段）查询主表记录。
+
+        record_id 是对象级别的唯一标识，一次查询对应最多一条记录。
+        summary_functions 在返回时自动反序列化为 list。
+
+        返回 (record_dict, None) 表示找到；(None, None) 表示不存在；(None, 错误描述) 表示异常。
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                'SELECT * FROM paper_record_v01_min WHERE record_id = ?',
+                (record_id,)
+            ).fetchone()
+            conn.close()
+            if row is None:
+                return None, None
+            return self._paper_row_to_dict(row), None
+        except sqlite3.Error as e:
+            return None, f"查询 paper_record（record_id={record_id}）失败：{e}"
+
+    def get_fae_record_by_fae_id(self, fae_id: str) -> tuple[dict | None, str | None]:
+        """按 fae_id（主键）查询单条 FAE 子记录。
+
+        返回 (fae_dict, None) 表示找到；(None, None) 表示不存在；(None, 错误描述) 表示异常。
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                'SELECT * FROM function_assay_evidence_v01_min WHERE fae_id = ?',
+                (fae_id,)
+            ).fetchone()
+            conn.close()
+            if row is None:
+                return None, None
+            return dict(row), None
+        except sqlite3.Error as e:
+            return None, f"查询 FAE 记录（fae_id={fae_id}）失败：{e}"
+
+    def get_fae_records_by_record_id(self, record_id: str) -> tuple[list[dict], str | None]:
+        """按 record_id（外键）查询该对象下的全部 FAE 子记录。
+
+        record_id 与子表是一对多关系，返回结果列表按 fae_id 升序排列。
+        记录不存在时返回空列表，而非报错。
+
+        返回 (fae_list, None) 表示成功（列表可能为空）；([], 错误描述) 表示异常。
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                'SELECT * FROM function_assay_evidence_v01_min '
+                'WHERE record_id = ? ORDER BY fae_id ASC',
+                (record_id,)
+            ).fetchall()
+            conn.close()
+            return [dict(row) for row in rows], None
+        except sqlite3.Error as e:
+            return [], f"查询 FAE 记录列表（record_id={record_id}）失败：{e}"
+
+    # ------------------------------------------------------------------
+    # 内部工具
+    # ------------------------------------------------------------------
+
+    def _paper_row_to_dict(self, row: sqlite3.Row) -> dict:
+        """将主表的 sqlite3.Row 转为 dict，并将 summary_functions 反序列化为 list。
+
+        写入时 list 被序列化为分号字符串（如 adsorption;remineralization），
+        读取时还原为 list 以保持与 LLM 输出格式的一致性，调用方无需手动 split。
+        """
+        d = dict(row)
+        if d.get('summary_functions'):
+            d['summary_functions'] = [f.strip() for f in d['summary_functions'].split(';')]
+        return d
 
     def _connect(self) -> sqlite3.Connection:
         """创建并返回一个开启了外键约束的数据库连接。"""

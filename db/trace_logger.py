@@ -228,6 +228,73 @@ class TraceLogger:
         return self._run_id
 
     # ------------------------------------------------------------------
+    # 查询方法
+    # ------------------------------------------------------------------
+
+    def get_run(self) -> tuple[dict | None, str | None]:
+        """查询当前 run 的 extraction_runs 完整记录（按 run_id 主键）。
+
+        通常在 finalize() 之后调用，用于确认最终写入的 token 汇总和运行状态。
+
+        返回 (run_dict, None) 表示找到；(None, None) 表示记录不存在（异常情况）；
+        (None, 错误描述) 表示数据库异常。
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                'SELECT * FROM extraction_runs WHERE run_id = ?',
+                (self._run_id,)
+            ).fetchone()
+            conn.close()
+            if row is None:
+                return None, None
+            return dict(row), None
+        except sqlite3.Error as e:
+            return None, f"查询 extraction_runs（run_id={self._run_id}）失败：{e}"
+
+    def get_step_by_step_id(self, step_id: str) -> tuple[dict | None, str | None]:
+        """按 step_id（主键）查询单条 trace_steps 记录。
+
+        通常在 insert_step() 或 update_step() 之后调用，用于核验写入内容。
+
+        返回 (step_dict, None) 表示找到；(None, None) 表示不存在；(None, 错误描述) 表示异常。
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                'SELECT * FROM trace_steps WHERE step_id = ?',
+                (step_id,)
+            ).fetchone()
+            conn.close()
+            if row is None:
+                return None, None
+            return dict(row), None
+        except sqlite3.Error as e:
+            return None, f"查询 trace_steps（step_id={step_id}）失败：{e}"
+
+    def get_steps(self) -> tuple[list[dict], str | None]:
+        """查询当前 run 下的全部 trace_steps 记录，按 step_index 升序排列。
+
+        v0.1 正常情况下只有 1 条；v0.2 引入 repair/分块后可能有多条。
+        记录不存在时返回空列表，而非报错。
+
+        返回 (steps_list, None) 表示成功（列表可能为空）；([], 错误描述) 表示异常。
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                'SELECT * FROM trace_steps WHERE run_id = ? ORDER BY step_index ASC',
+                (self._run_id,)
+            ).fetchall()
+            conn.close()
+            return [dict(row) for row in rows], None
+        except sqlite3.Error as e:
+            return [], f"查询 trace_steps 列表（run_id={self._run_id}）失败：{e}"
+
+    # ------------------------------------------------------------------
 
     def _connect(self) -> sqlite3.Connection:
         """创建并返回一个开启了外键约束的数据库连接。"""
