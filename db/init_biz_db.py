@@ -81,7 +81,7 @@ def _create_tables(conn):
 
 
 def _create_indexes(conn):
-    """创建查询优化索引。
+    """创建查询优化索引
 
     idx_pr_extraction_run：支持从 run_id 反向查找业务记录（跨库溯源）。
     idx_fae_record_id    ：支持按 record_id 快速聚合 FAE 子记录。
