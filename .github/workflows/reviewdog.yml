@@ -24,11 +24,6 @@ jobs:
         uses: reviewdog/action-setup@v1
         with:
           reviewdog_version: latest
-      - name: flake8
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          flake8 . 2>&1 | reviewdog -efm="%f:%l:%c: %m" -reporter=github-pr-review -name=flake8 -filter-mode=diff_context || true
 
       - name: ruff
         env:
