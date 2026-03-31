@@ -44,4 +44,4 @@ jobs:
             -conf=.reviewdog.yml \
             -runners=ruff \
             -reporter=github-pr-review \
-            -filter-mode=added
+            -filter-mode=nofilter
