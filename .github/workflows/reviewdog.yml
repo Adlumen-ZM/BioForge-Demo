@@ -1,0 +1,42 @@
+name: reviewdog
+on: [pull_request]
+
+jobs:
+  reviewdog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # 必须显式声明，否则无法发 PR 评论
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod  # 自动读取项目 Go 版本
+          cache: true              # 内置 go module 缓存，无需手动配置
+
+      - name: Set up reviewdog
+        uses: reviewdog/action-setup@v1
+        with:
+          reviewdog_version: latest
+
+      - name: golint
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          go install golang.org/x/lint/golint@latest
+          golint ./... | reviewdog -reporter=github-pr-review -level=error -name=golint -filter-mode=diff_context
+
+      - name: go vet
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          go vet ./... 2>&1 | reviewdog -reporter=github-pr-review -level=warning -name=govet -filter-mode=diff_context
+
+      - name: staticcheck
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./... | reviewdog -reporter=github-pr-review -level=warning -name=staticcheck -filter-mode=diff_context
