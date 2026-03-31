@@ -26,7 +26,7 @@ def init_biz_database():
 
 
 def _create_tables(conn):
-    """创建业务数据库的两张核心表。
+    """创建业务数据库的两张核心表:
 
     表一 paper_record_v01_min：论文级主表，每篇论文一条记录。
     表二 function_assay_evidence_v01_min：FAE 子表，每条功能实验证据一条记录，
