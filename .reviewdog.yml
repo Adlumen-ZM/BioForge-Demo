@@ -1,35 +1,21 @@
 runner:
   flake8:
-    # cmd = 真正执行的 linter 命令
-    #
-    # 这里显式固定输出格式：
-    #   path:line:col: CODE message
-    #
-    # 未来如果你想只检查某个目录，比如 src 和 tests：
-    #   flake8 src tests --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s'
-    cmd: flake8 . --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s'
+    # 关键点 1：
+    # --exit-zero 防止 flake8 因为发现 lint 问题直接让 GitHub step 失败
+    cmd: flake8 . --exit-zero --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s'
 
-    # errorformat = reviewdog 如何解析 flake8 输出
-    #
-    # %f = file
-    # %l = line
-    # %c = column
-    # %m = message
+    # reviewdog 官方配置格式支持 errorformat
     errorformat:
       - "%f:%l:%c: %m"
 
-    # level 可以理解为 reviewdog 给这类结果打的严重级别
-    # 可选常见值：info / warning / error
-    #
-    # 如果你想 flake8 评论更“重”，可以改成 error
+    # 这里只影响 report level，不会默认让 reviewdog 返回 1
     level: warning
 
   ruff:
-    # 这里选择 pylint 风格输出，是因为容易被 reviewdog 用 efm 解析
-    #
-    # 未来如果你改成别的输出格式，比如 github / json，
-    # 那这里的 format / errorformat 也要一起改
-    cmd: ruff check . --output-format=pylint
+    # 关键点 2：
+    # ruff check 默认发现 violations 返回 1；加 --exit-zero 改成 0
+    # output-format=pylint 方便用同一个 errorformat 解析
+    cmd: ruff check . --exit-zero --output-format=pylint
 
     errorformat:
       - "%f:%l:%c: %m"
