@@ -2,11 +2,8 @@ runner:
   flake8:
     cmd: flake8
     level: warning
-    format: rdjson
-    name: flake8
 
   ruff:
     cmd: ruff check --output-format=json
     level: warning
     parser: rdjsonl
-    name: ruff
