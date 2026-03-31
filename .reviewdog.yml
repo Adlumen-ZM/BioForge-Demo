@@ -1,4 +1,5 @@
 runner:
-  flake8:
-    cmd: flake8
+  ruff:
+    cmd: ruff check . --exit-zero --output-format=rdjson
+    format: rdjson
     level: warning
