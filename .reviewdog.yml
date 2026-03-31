@@ -1,23 +1,12 @@
 runner:
   flake8:
-    # 关键点 1：
-    # --exit-zero 防止 flake8 因为发现 lint 问题直接让 GitHub step 失败
-    cmd: flake8 . --exit-zero --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s'
-
-    # reviewdog 官方配置格式支持 errorformat
-    errorformat:
-      - "%f:%l:%c: %m"
-
-    # 这里只影响 report level，不会默认让 reviewdog 返回 1
+    cmd: flake8
     level: warning
+    errorformat: '%f:%l:%c: %m'
+    name: flake8
 
   ruff:
-    # 关键点 2：
-    # ruff check 默认发现 violations 返回 1；加 --exit-zero 改成 0
-    # output-format=pylint 方便用同一个 errorformat 解析
-    cmd: ruff check . --exit-zero --output-format=pylint
-
-    errorformat:
-      - "%f:%l:%c: %m"
-
+    cmd: ruff check --output-format=json
     level: warning
+    parser: rdjsonl
+    name: ruff
