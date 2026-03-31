@@ -5,25 +5,34 @@ on:
 
 jobs:
   reviewdog:
-    name: Run reviewdog for Python linters
+    name: reviewdog
     runs-on: ubuntu-latest
+
+    # 先强制 GitHub Actions 用 Node 24，消掉 Node 20 迁移警告
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+    # github-pr-check 需要 checks: write
+    # 未来如果改成 github-pr-review，也需要 pull-requests: write
     permissions:
       contents: read
       pull-requests: write
+      checks: write
 
     steps:
+      # 取完整历史，避免 diff / merge-base 一类问题
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
+      # 这里必须用 v6，不要再用 v5
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
-      - name: Install linters
+      - name: Install tools
         run: |
           python -m pip install --upgrade pip
           pip install flake8 ruff
@@ -33,33 +42,36 @@ jobs:
         with:
           reviewdog_version: latest
 
+      # 这一步先保留，目的是确认 GitHub 实际拿到的是你现在这份文件
       - name: Debug versions
         run: |
+          echo "GITHUB_SHA=$GITHUB_SHA"
           python --version
           flake8 --version
           ruff --version
           reviewdog -version
+          echo "---- workflow check ----"
+          grep -n "setup-python" .github/workflows/reviewdog.yml || true
+          grep -n "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" .github/workflows/reviewdog.yml || true
 
-      - name: Run flake8 with reviewdog
+      - name: Run flake8 via reviewdog
         env:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          flake8 . --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s' \
-            | reviewdog \
-                -efm="%f:%l:%c: %m" \
-                -name="flake8" \
-                -reporter=github-pr-review \
-                -filter-mode=diff_context \
-                || true
+          reviewdog \
+            -conf=.reviewdog.yml \
+            -runners=flake8 \
+            -reporter=github-pr-check \
+            -filter-mode=diff_context \
+            -tee
 
-      - name: Run ruff with reviewdog
+      - name: Run ruff via reviewdog
         env:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ruff check . --output-format=pylint \
-            | reviewdog \
-                -efm="%f:%l:%c: %m" \
-                -name="ruff" \
-                -reporter=github-pr-review \
-                -filter-mode=diff_context \
-                || true
+          reviewdog \
+            -conf=.reviewdog.yml \
+            -runners=ruff \
+            -reporter=github-pr-check \
+            -filter-mode=diff_context \
+            -tee
