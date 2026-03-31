@@ -75,7 +75,7 @@ class TraceLogger:
                     http_status_code: int = 200) -> tuple[str | None, str | None]:
         """收到 LLM 响应后立即 INSERT trace_steps（step_status = 'processing'）。
 
-        called_at 和 response_at 均在收到响应后才传入，避免 DB 写入耗时干扰
+        called_at 和 response_at 均在收到响应后才传入，避免 DB 写入耗时干扰。
         response_time_ms 的计算（两个时间戳在调用方内存中用 time.time() 记录）。
 
         参数：
