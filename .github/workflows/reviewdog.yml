@@ -35,7 +35,7 @@ jobs:
       - name: Install tools
         run: |
           python -m pip install --upgrade pip
-          pip install flake8 ruff
+          pip install flake8
 
       - name: Set up reviewdog
         uses: reviewdog/action-setup@v1
@@ -48,7 +48,6 @@ jobs:
           echo "GITHUB_SHA=$GITHUB_SHA"
           python --version
           flake8 --version
-          ruff --version
           reviewdog -version
           echo "---- workflow check ----"
           grep -n "setup-python" .github/workflows/reviewdog.yml || true
