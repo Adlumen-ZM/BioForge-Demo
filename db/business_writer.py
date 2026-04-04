@@ -1,5 +1,5 @@
-import sqlite3
 import os
+import sqlite3
 
 # 业务数据库路径，优先读取环境变量，默认写入 data/ 目录
 BIZ_DB_PATH = os.getenv('BIZ_DB_PATH', 'data/hap_v01.db')

@@ -1,7 +1,7 @@
+from datetime import datetime, timezone
+import os
 import sqlite3
 import uuid
-import os
-from datetime import datetime, timezone
 
 # Trace 数据库路径，优先读取环境变量，默认写入 data/ 目录
 TRACE_DB_PATH = os.getenv('TRACE_DB_PATH', 'data/hap_trace.db')

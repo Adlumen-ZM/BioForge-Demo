@@ -1,5 +1,5 @@
-import sqlite3
 import os
+import sqlite3
 
 # Trace 数据库路径，优先读取环境变量，默认写入 data/ 目录
 TRACE_DB_PATH = os.getenv('TRACE_DB_PATH', 'data/hap_trace.db')
