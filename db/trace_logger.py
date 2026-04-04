@@ -40,7 +40,7 @@ class TraceLogger:
             paper_id       : 本次任务处理的论文编号，关联业务库 paper_record.paper_id
             model_name     : 实际调用的模型名称，如 'gpt-4o'
             prompt_version : System Prompt 版本号，如 'v0.1.0'
-            schema_version : 字段字典版本号，如 'v0.05'
+            schema_version : 字段字典的版本号，如 'v0.05'
         """
         self._db_path = TRACE_DB_PATH
 
@@ -75,7 +75,7 @@ class TraceLogger:
                     http_status_code: int = 200) -> tuple[str | None, str | None]:
         """收到 LLM 响应后立即 INSERT trace_steps（step_status = 'processing'）。
 
-        called_at 和 response_at 均在收到响应后才传入，避免 DB 写入耗时干扰
+        called_at 和 response_at 均在收到响应后才传入，避免 DB 写入耗时干扰。
         response_time_ms 的计算（两个时间戳在调用方内存中用 time.time() 记录）。
 
         参数：

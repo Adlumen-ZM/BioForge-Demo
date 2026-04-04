@@ -26,7 +26,7 @@ def init_biz_database():
 
 
 def _create_tables(conn):
-    """创建业务数据库的两张核心表。
+    """创建业务数据库的两张核心表:
 
     表一 paper_record_v01_min：论文级主表，每篇论文一条记录。
     表二 function_assay_evidence_v01_min：FAE 子表，每条功能实验证据一条记录，
@@ -81,7 +81,7 @@ def _create_tables(conn):
 
 
 def _create_indexes(conn):
-    """创建查询优化索引。
+    """创建查询优化索引
 
     idx_pr_extraction_run：支持从 run_id 反向查找业务记录（跨库溯源）。
     idx_fae_record_id    ：支持按 record_id 快速聚合 FAE 子记录。
