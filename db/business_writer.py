@@ -183,6 +183,7 @@ class BusinessDBWriter:
         if not ok:
             return False, f"写入前字段校验失败：{err}"
 
+        conn = None
         try:
             conn = self._connect()
 
@@ -192,7 +193,6 @@ class BusinessDBWriter:
                 'SELECT 1 FROM paper_record_v01_min WHERE paper_id = ?',
                 (parsed['paper_id'],)
             ).fetchone():
-                conn.close()
                 return False, f"paper_id '{parsed['paper_id']}' 已存在，拒绝重复写入"
 
             # ── 3. 唯一键重复检查：record_id 不得已存在 ──────────────────
@@ -200,7 +200,6 @@ class BusinessDBWriter:
                 'SELECT 1 FROM paper_record_v01_min WHERE record_id = ?',
                 (parsed['record_id'],)
             ).fetchone():
-                conn.close()
                 return False, f"record_id '{parsed['record_id']}' 已存在，拒绝重复写入"
 
             # ── 4. 执行写入 ───────────────────────────────────────────────
@@ -229,10 +228,14 @@ class BusinessDBWriter:
                  parsed.get('curator_note'))
             )
             conn.commit()
-            conn.close()
             return True, None
         except sqlite3.Error as e:
+            if conn is not None:
+                conn.rollback()
             return False, f"写入 paper_record 失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def write_fae_records(self, fae_list: list, record_id: str) -> tuple[bool, str | None]:
         """批量 INSERT function_assay_evidence_v01_min，将所有 FAE 条目一次性写入。
@@ -250,6 +253,7 @@ class BusinessDBWriter:
         if not fae_list:
             return True, None
 
+        conn = None
         try:
             conn = self._connect()
 
@@ -258,19 +262,14 @@ class BusinessDBWriter:
                 # ── 1. 字段校验：必填字段与枚举值 ────────────────────────
                 for field in _REQUIRED_FAE:
                     if fae.get(field) is None:
-                        conn.close()
                         return False, f"FAE[{i}] 必填字段缺失或为 null：'{field}'"
                 if fae['function_label'] not in _FUNCTIONS:
-                    conn.close()
                     return False, f"FAE[{i}] function_label 值不合法：'{fae['function_label']}'"
                 if fae['evidence_level'] not in _EVIDENCE_LEVEL:
-                    conn.close()
                     return False, f"FAE[{i}] evidence_level 值不合法：'{fae['evidence_level']}'"
                 if fae['assay_category'] not in _ASSAY_CATEGORY:
-                    conn.close()
                     return False, f"FAE[{i}] assay_category 值不合法：'{fae['assay_category']}'"
                 if fae['trace_status'] not in _TRACE_STATUS:
-                    conn.close()
                     return False, f"FAE[{i}] trace_status 值不合法：'{fae['trace_status']}'"
 
                 # ── 2. 主键重复检查：fae_id 不得已存在 ───────────────────
@@ -278,7 +277,6 @@ class BusinessDBWriter:
                     'SELECT 1 FROM function_assay_evidence_v01_min WHERE fae_id = ?',
                     (fae['fae_id'],)
                 ).fetchone():
-                    conn.close()
                     return False, f"FAE[{i}] fae_id '{fae['fae_id']}' 已存在，拒绝重复写入"
 
             # ── 3. 全部校验通过，执行批量写入 ────────────────────────────
@@ -297,10 +295,14 @@ class BusinessDBWriter:
                  for fae in fae_list]
             )
             conn.commit()
-            conn.close()
             return True, None
         except sqlite3.Error as e:
+            if conn is not None:
+                conn.rollback()
             return False, f"批量写入 FAE 记录失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def integrity_check(self, paper_id: str, expected_fae_count: int) -> tuple[str, str | None]:
         """全部写入完成后对数据库进行反向校验，确认写入结果与预期一致。
@@ -313,6 +315,7 @@ class BusinessDBWriter:
         返回 ('passed', None) 或 ('failed', 具体原因)。
         结果应由调用方通过 TraceLogger.update_run() 写入 Trace 库。
         """
+        conn = None
         try:
             conn = self._connect()
 
@@ -322,7 +325,6 @@ class BusinessDBWriter:
                 (paper_id,)
             ).fetchone()
             if row is None:
-                conn.close()
                 return 'failed', f'未找到 paper_id={paper_id} 的主表记录'
             record_id = row[0]
 
@@ -336,7 +338,6 @@ class BusinessDBWriter:
                 (paper_id,)
             ).fetchone()[0]
             if null_count > 0:
-                conn.close()
                 return 'failed', '核心字段存在 NULL 值'
 
             # ── 3. FAE 记录数量核对 ──────────────────────────────────
@@ -344,7 +345,6 @@ class BusinessDBWriter:
                 'SELECT COUNT(*) FROM function_assay_evidence_v01_min WHERE record_id = ?',
                 (record_id,)
             ).fetchone()[0]
-            conn.close()
 
             if actual != expected_fae_count:
                 return 'failed', f'FAE 记录数不符：预期 {expected_fae_count} 条，实际写入 {actual} 条'
@@ -352,7 +352,12 @@ class BusinessDBWriter:
             return 'passed', None
 
         except sqlite3.Error as e:
+            if conn is not None:
+                conn.rollback()
             return 'failed', f'完整性检查时数据库异常：{e}'
+        finally:
+            if conn is not None:
+                conn.close()
 
     # ------------------------------------------------------------------
     # 查询方法
@@ -366,6 +371,7 @@ class BusinessDBWriter:
 
         返回 (record_dict, None) 表示找到；(None, None) 表示不存在；(None, 错误描述) 表示异常。
         """
+        conn = None
         try:
             conn = self._connect()
             conn.row_factory = sqlite3.Row  # 使结果行可按列名访问
@@ -373,12 +379,14 @@ class BusinessDBWriter:
                 'SELECT * FROM paper_record_v01_min WHERE paper_id = ?',
                 (paper_id,)
             ).fetchone()
-            conn.close()
             if row is None:
                 return None, None
             return self._paper_row_to_dict(row), None
         except sqlite3.Error as e:
             return None, f"查询 paper_record（paper_id={paper_id}）失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def get_paper_record_by_record_id(self, record_id: str) -> tuple[dict | None, str | None]:
         """按 record_id（UNIQUE 字段）查询主表记录。
@@ -388,6 +396,7 @@ class BusinessDBWriter:
 
         返回 (record_dict, None) 表示找到；(None, None) 表示不存在；(None, 错误描述) 表示异常。
         """
+        conn = None
         try:
             conn = self._connect()
             conn.row_factory = sqlite3.Row
@@ -395,18 +404,21 @@ class BusinessDBWriter:
                 'SELECT * FROM paper_record_v01_min WHERE record_id = ?',
                 (record_id,)
             ).fetchone()
-            conn.close()
             if row is None:
                 return None, None
             return self._paper_row_to_dict(row), None
         except sqlite3.Error as e:
             return None, f"查询 paper_record（record_id={record_id}）失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def get_fae_record_by_fae_id(self, fae_id: str) -> tuple[dict | None, str | None]:
         """按 fae_id（主键）查询单条 FAE 子记录。
 
         返回 (fae_dict, None) 表示找到；(None, None) 表示不存在；(None, 错误描述) 表示异常。
         """
+        conn = None
         try:
             conn = self._connect()
             conn.row_factory = sqlite3.Row
@@ -414,12 +426,14 @@ class BusinessDBWriter:
                 'SELECT * FROM function_assay_evidence_v01_min WHERE fae_id = ?',
                 (fae_id,)
             ).fetchone()
-            conn.close()
             if row is None:
                 return None, None
             return dict(row), None
         except sqlite3.Error as e:
             return None, f"查询 FAE 记录（fae_id={fae_id}）失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def get_fae_records_by_record_id(self, record_id: str) -> tuple[list[dict], str | None]:
         """按 record_id（外键）查询该对象下的全部 FAE 子记录。
@@ -429,6 +443,7 @@ class BusinessDBWriter:
 
         返回 (fae_list, None) 表示成功（列表可能为空）；([], 错误描述) 表示异常。
         """
+        conn = None
         try:
             conn = self._connect()
             conn.row_factory = sqlite3.Row
@@ -437,10 +452,12 @@ class BusinessDBWriter:
                 'WHERE record_id = ? ORDER BY fae_id ASC',
                 (record_id,)
             ).fetchall()
-            conn.close()
             return [dict(row) for row in rows], None
         except sqlite3.Error as e:
             return [], f"查询 FAE 记录列表（record_id={record_id}）失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     # ------------------------------------------------------------------
     # 内部工具

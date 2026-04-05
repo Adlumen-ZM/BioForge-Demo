@@ -53,17 +53,21 @@ class TraceLogger:
         self._step_counter = 0
 
         # INSERT 占位记录，后续各阶段通过 update_run / finalize 逐步补充字段
-        conn = self._connect()
-        conn.execute(
-            """INSERT INTO extraction_runs
-               (run_id, paper_id, model_name, prompt_version, schema_version,
-                started_at, run_status)
-               VALUES (?, ?, ?, ?, ?, ?, 'running')""",
-            (self._run_id, paper_id, model_name, prompt_version, schema_version,
-             datetime.now(timezone.utc).isoformat())
-        )
-        conn.commit()
-        conn.close()
+        conn = None
+        try:
+            conn = self._connect()
+            conn.execute(
+                """INSERT INTO extraction_runs
+                   (run_id, paper_id, model_name, prompt_version, schema_version,
+                    started_at, run_status)
+                   VALUES (?, ?, ?, ?, ?, ?, 'running')""",
+                (self._run_id, paper_id, model_name, prompt_version, schema_version,
+                 datetime.now(timezone.utc).isoformat())
+            )
+            conn.commit()
+        finally:
+            if conn is not None:
+                conn.close()
 
     # ------------------------------------------------------------------
     # Step 级别操作
@@ -100,6 +104,7 @@ class TraceLogger:
         ).total_seconds()
         response_time_ms = int(delta * 1000)
 
+        conn = None
         try:
             conn = self._connect()
             conn.execute(
@@ -115,12 +120,16 @@ class TraceLogger:
                  called_at, response_at, response_time_ms, http_status_code)
             )
             conn.commit()
-            conn.close()
             return step_id, None
         except sqlite3.Error as e:
             # step_counter 已自增，写入失败时回退，防止序号跳空
             self._step_counter -= 1
+            if conn is not None:
+                conn.rollback()
             return None, f"INSERT trace_steps 失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def update_step(self, step_id: str, **kwargs) -> tuple[bool, str | None]:
         """逐步补充 trace_steps 字段（解析完成后、校验完成后各调用一次）。
@@ -136,6 +145,7 @@ class TraceLogger:
             return True, None  # 无有效字段，视为成功（无需操作）
 
         set_clause = ', '.join(f'{k} = ?' for k in fields)
+        conn = None
         try:
             conn = self._connect()
             conn.execute(
@@ -143,10 +153,14 @@ class TraceLogger:
                 (*fields.values(), step_id)
             )
             conn.commit()
-            conn.close()
             return True, None
         except sqlite3.Error as e:
+            if conn is not None:
+                conn.rollback()
             return False, f"UPDATE trace_steps 失败（step_id={step_id}）：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     # ------------------------------------------------------------------
     # Run 级别操作
@@ -165,6 +179,7 @@ class TraceLogger:
             return True, None
 
         set_clause = ', '.join(f'{k} = ?' for k in fields)
+        conn = None
         try:
             conn = self._connect()
             conn.execute(
@@ -172,10 +187,14 @@ class TraceLogger:
                 (*fields.values(), self._run_id)
             )
             conn.commit()
-            conn.close()
             return True, None
         except sqlite3.Error as e:
+            if conn is not None:
+                conn.rollback()
             return False, f"UPDATE extraction_runs 失败（run_id={self._run_id}）：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def finalize(self, run_status: str, error_message: str = None) -> tuple[bool, str | None]:
         """汇总 token 消耗并写入最终运行状态，在全部流程结束后调用。
@@ -189,6 +208,7 @@ class TraceLogger:
 
         返回 (True, None) 表示成功；(False, 错误描述) 表示失败。
         """
+        conn = None
         try:
             conn = self._connect()
 
@@ -215,10 +235,14 @@ class TraceLogger:
                  run_status, error_message, self._run_id)
             )
             conn.commit()
-            conn.close()
             return True, None
         except sqlite3.Error as e:
+            if conn is not None:
+                conn.rollback()
             return False, f"finalize 写入失败（run_id={self._run_id}）：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def get_run_id(self) -> str:
         """返回当前 run_id，供业务写入时存入 paper_record.extraction_run_id。
@@ -239,6 +263,7 @@ class TraceLogger:
         返回 (run_dict, None) 表示找到；(None, None) 表示记录不存在（异常情况）；
         (None, 错误描述) 表示数据库异常。
         """
+        conn = None
         try:
             conn = self._connect()
             conn.row_factory = sqlite3.Row
@@ -246,12 +271,14 @@ class TraceLogger:
                 'SELECT * FROM extraction_runs WHERE run_id = ?',
                 (self._run_id,)
             ).fetchone()
-            conn.close()
             if row is None:
                 return None, None
             return dict(row), None
         except sqlite3.Error as e:
             return None, f"查询 extraction_runs（run_id={self._run_id}）失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def get_step_by_step_id(self, step_id: str) -> tuple[dict | None, str | None]:
         """按 step_id（主键）查询单条 trace_steps 记录。
@@ -260,6 +287,7 @@ class TraceLogger:
 
         返回 (step_dict, None) 表示找到；(None, None) 表示不存在；(None, 错误描述) 表示异常。
         """
+        conn = None
         try:
             conn = self._connect()
             conn.row_factory = sqlite3.Row
@@ -267,12 +295,14 @@ class TraceLogger:
                 'SELECT * FROM trace_steps WHERE step_id = ?',
                 (step_id,)
             ).fetchone()
-            conn.close()
             if row is None:
                 return None, None
             return dict(row), None
         except sqlite3.Error as e:
             return None, f"查询 trace_steps（step_id={step_id}）失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     def get_steps(self) -> tuple[list[dict], str | None]:
         """查询当前 run 下的全部 trace_steps 记录，按 step_index 升序排列。
@@ -282,6 +312,7 @@ class TraceLogger:
 
         返回 (steps_list, None) 表示成功（列表可能为空）；([], 错误描述) 表示异常。
         """
+        conn = None
         try:
             conn = self._connect()
             conn.row_factory = sqlite3.Row
@@ -289,10 +320,12 @@ class TraceLogger:
                 'SELECT * FROM trace_steps WHERE run_id = ? ORDER BY step_index ASC',
                 (self._run_id,)
             ).fetchall()
-            conn.close()
             return [dict(row) for row in rows], None
         except sqlite3.Error as e:
             return [], f"查询 trace_steps 列表（run_id={self._run_id}）失败：{e}"
+        finally:
+            if conn is not None:
+                conn.close()
 
     # ------------------------------------------------------------------
 
