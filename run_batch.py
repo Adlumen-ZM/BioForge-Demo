@@ -275,6 +275,32 @@ def write_result_txt(pdf_name: str, result: dict, output_path: Path):
     output_path.write_text('\n'.join(lines), encoding='utf-8')
 
 
+# ── Think txt（LLM <think> 推理块全文）──────────────────────
+
+def write_think_txt(pdf_name: str, run_id: str, think_content: str, output_path: Path):
+    """将 LLM <think>...</think> 推理块内容写入独立 txt 文件。
+
+    think_content 由 parse_response() 从原始响应中提取，多个 think 块以双换行拼接。
+    """
+    sep = '═' * 62
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+
+    lines = [
+        sep,
+        'PepClaw v0.1 LLM Think 推理过程',
+        f'生成时间：{now}',
+        f'来源 PDF：{pdf_name}',
+        f'run_id：{run_id}',
+        sep,
+        '',
+        think_content,
+        '',
+        sep,
+        '',
+    ]
+    output_path.write_text('\n'.join(lines), encoding='utf-8')
+
+
 # ── 完整 Trace txt（包含 prompt/response 全文）────────────────
 
 def write_trace_txt(pdf_name: str, run_id: str, output_path: Path):
@@ -458,7 +484,14 @@ for idx, pdf_path in enumerate(_pdf_files, 1):
                 run_id = agent.last_result.get('_run_id', '')
                 if run_id:
                     write_trace_txt(pdf_path.name, run_id, trace_txt_path)
-                    print(f'  → 成功  |  txt 报告：{txt_path}  |  trace：{trace_txt_path}')
+                    # 写 think txt（如有 think 内容）
+                    think_content = agent.last_result.get('_think_content')
+                    if think_content:
+                        think_txt_path = _results_dir / (pdf_path.stem + '_think.txt')
+                        write_think_txt(pdf_path.name, run_id, think_content, think_txt_path)
+                        print(f'  → 成功  |  txt 报告：{txt_path}  |  trace：{trace_txt_path}  |  think：{think_txt_path}')
+                    else:
+                        print(f'  → 成功  |  txt 报告：{txt_path}  |  trace：{trace_txt_path}')
                 else:
                     print(f'  → 成功  |  txt 报告：{txt_path}')
             else:

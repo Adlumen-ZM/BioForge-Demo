@@ -138,7 +138,7 @@ class TextAgent:
         # parsed_output : 业务字段字典（去除 reasoning 字段）
         # llm_reasoning : reasoning 字段 JSON 字符串
         # ══════════════════════════════════════════════════════════════
-        parsed_output, llm_reasoning, err = parse_response(llm_result['raw_response'])
+        parsed_output, llm_reasoning, llm_think, err = parse_response(llm_result['raw_response'])
         if err:
             # JSON 解析失败：更新 step_status 为 parse_error，终止流程
             if step_id:
@@ -245,7 +245,7 @@ class TextAgent:
         # ══════════════════════════════════════════════════════════════
         if check_status == 'passed':
             logger.finalize('success')
-            self._last_result = {**parsed_output, '_run_id': run_id}
+            self._last_result = {**parsed_output, '_run_id': run_id, '_think_content': llm_think}
             return True, None
         else:
             # 完整性检查失败：数据已写入但存在异常，以 failed 状态记录

@@ -11,8 +11,8 @@ _REASONING_FIELDS = [
 ]
 
 
-def parse_response(raw_response: str) -> tuple[dict | None, str | None, str | None]:
-    """解析 LLM 原始输出字符串，提取业务字段字典和 reasoning JSON。
+def parse_response(raw_response: str) -> tuple[dict | None, str | None, str | None, str | None]:
+    """解析 LLM 原始输出字符串，提取业务字段字典、reasoning JSON 和 think 内容。
 
     解析策略（按优先级尝试）：
       1. 直接将原始字符串作为 JSON 解析
@@ -23,18 +23,24 @@ def parse_response(raw_response: str) -> tuple[dict | None, str | None, str | No
     参数：
         raw_response : LLM 原始输出字符串
 
-    成功时返回 (parsed_output, llm_reasoning_json, None)：
+    成功时返回 (parsed_output, llm_reasoning_json, llm_think, None)：
         parsed_output      : 去除 reasoning 字段后的业务字段字典，
                              可直接传给 BusinessDBWriter.validate_record()
         llm_reasoning_json : reasoning 字段的 JSON 字符串，
                              存入 trace_steps.llm_reasoning；
                              若 LLM 未提供任何 reasoning 字段则为 None
+        llm_think          : <think>...</think> 块的完整内容（多块以双换行拼接）；
+                             若 LLM 未输出 think 块则为 None
 
-    失败时返回 (None, None, 错误描述)。
+    失败时返回 (None, None, None, 错误描述)。
     """
     text = raw_response.strip()
 
-    # 剥离 MiniMax M2.7 等模型输出的 <think>...</think> 推理块
+    # 提取 <think>...</think> 推理块内容（保留供外部写入独立 txt）
+    think_blocks = re.findall(r'<think>(.*?)</think>', text, flags=re.DOTALL)
+    llm_think = '\n\n'.join(b.strip() for b in think_blocks) if think_blocks else None
+
+    # 剥离 <think> 块后再解析 JSON
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
     # 尝试各种方式提取 JSON 文本
@@ -44,10 +50,10 @@ def parse_response(raw_response: str) -> tuple[dict | None, str | None, str | No
     try:
         data = json.loads(json_text)
     except json.JSONDecodeError as e:
-        return None, None, f'LLM 输出非合法 JSON：{e}'
+        return None, None, None, f'LLM 输出非合法 JSON：{e}'
 
     if not isinstance(data, dict):
-        return None, None, f'LLM 输出解析结果不是 JSON 对象，实际类型：{type(data).__name__}'
+        return None, None, None, f'LLM 输出解析结果不是 JSON 对象，实际类型：{type(data).__name__}'
 
     # 提取 reasoning 字段，从 data 中原地弹出（不写入业务表）
     reasoning = {}
@@ -58,7 +64,7 @@ def parse_response(raw_response: str) -> tuple[dict | None, str | None, str | No
     # reasoning 序列化为 JSON 字符串存入 Trace；无 reasoning 字段时存 None
     llm_reasoning_json = json.dumps(reasoning, ensure_ascii=False) if reasoning else None
 
-    return data, llm_reasoning_json, None
+    return data, llm_reasoning_json, llm_think, None
 
 
 def _extract_json_text(text: str) -> str:

@@ -97,7 +97,7 @@ def call_llm(system_prompt: str, user_prompt: str) -> tuple[dict | None, str | N
                 {'role': 'user', 'content': user_prompt},
             ],
             temperature=0.2,   # 低温度保证抽取结果的确定性
-            max_tokens=4096,
+            max_tokens=65536,
         )
 
         # 收到响应后立即记录时间
