@@ -1,0 +1,1067 @@
+══════════════════════════════════════════════════════════════
+PepClaw v0.1 完整 Trace 记录
+生成时间：2026-04-05 19:57:43 UTC
+来源 PDF：v0.1_article_test.pdf
+run_id：run_20260405_195654_77f8e6
+══════════════════════════════════════════════════════════════
+
+【extraction_runs — 任务摘要】
+  run_id：run_20260405_195654_77f8e6
+  paper_id：P000001
+  run_status：success
+  model_name：MiniMax-M2.7-highspeed
+  prompt_version：v0.1.0
+  schema_version：v0.1
+  started_at：2026-04-05T19:56:54.622559+00:00
+  finished_at：2026-04-05T19:57:43.044468+00:00
+  总耗时：48.4 秒
+  total_input_tokens：14410
+  total_output_tokens：2828
+  total_tokens：17238
+  records_extracted：4
+  records_inserted：4
+  integrity_check_status：passed
+  integrity_check_detail：—
+
+══════════════════════════════════════════════════════════════
+【trace_steps — Step 1】
+  step_id：run_20260405_195654_77f8e6_step_01
+  step_type：extraction
+  model_name：MiniMax-M2.7-highspeed
+  http_status_code：200
+  step_status：success
+  called_at：2026-04-05T19:56:54.967230+00:00
+  response_at：2026-04-05T19:57:43.030260+00:00
+  response_time_ms：48.06 秒（48063 ms）
+  input_tokens：14410
+  output_tokens：2828
+
+──────────────────────────────────────────────────────────────
+【prompt_system（完整）】
+──────────────────────────────────────────────────────────────
+你是一名专业的生物医学文献挖掘助手，专注于羟基磷灰石（HAp）结合肽的研究领域。你的任务是从提供的科学论文全文中，结构化地抽取 HAp 结合肽的相关信息。
+
+## 输出要求
+
+输出一个合法的 JSON 对象。不要使用 markdown 代码块包裹。JSON 前后不要有任何其他文字。
+
+JSON 的顶层结构如下：
+- 论文级字段（v0.1 阶段每篇论文对应一个肽段对象）
+- "fae_records" 数组，包含一条或多条 FAE（功能-实验-证据）子记录
+
+## 论文级字段
+
+  - doi (string) [必填]: 论文 DOI，论文的全局唯一标识符，如 10.1016/j.dental.2023.01.001
+  - pmid (string or null) [可选]: PubMed ID，部分论文（预印本等）可能无 PMID，填 null
+  - title (string) [必填]: 论文完整标题，原文字面量，不做标准化处理
+  - journal_title (string) [必填]: 期刊名称，原文字面量
+  - publication_year (integer) [必填]: 论文发表年份，4 位整数，如 2023
+  - entity_name_raw (string) [必填]: 原文对象名，直接从论文中抽取的字面名称，如 'enamel binding peptide (EBP)'
+  - entity_name_normalized (string) [必填]: 标准化对象名，v0.1 采用氨基酸序列单字母缩写，如 'WGNYAYK'
+  - sequence_raw (string) [必填]: 原始氨基酸序列，单字母缩写，原文字面量，如 'WGNYAYK'
+  - interaction_target (string) [必填]: 允许值：['HAp', 'enamel', 'dentin', 'collagen', 'ACP', 'other', 'unclear']。 该肽段的主要作用对象。HAp = 纯羟基磷灰石晶体；enamel = 牙釉质（含 HAp 的生物矿化组织）；dentin = 牙本质；collagen = 胶原蛋白；ACP = 无定形磷酸钙；other = 其他；unclear = 无法判断。
+  - interaction_target_reason (string) [必填]: 【Reasoning 字段】判断 interaction_target 的依据，引用论文中的关键句或章节位置
+  - summary_functions (array of string) [必填]: 允许值：['adsorption', 'remineralization', 'mineralization', 'anti_demineralization', 'other']。 摘要层功能标签，最多选 3 个，只保留有直接实验证据支持的功能。adsorption = 吸附/结合；remineralization = 再矿化；mineralization = 矿化；anti_demineralization = 抑制脱矿；other = 其他。
+  - summary_functions_reason (string) [必填]: 【Reasoning 字段】判断 summary_functions 的依据，说明为何选取这些功能标签
+  - evidence_overall_level (string) [必填]: 允许值：['in_vitro', 'ex_vivo', 'animal_in_vivo', 'clinical', 'in_silico', 'unclear']。 总体证据层级，反映该论文最高的证据层级。in_vitro = 体外实验（含离体牙体系，v0.1 统一归为此类）；ex_vivo = 离体组织实验（v0.2 细化）；animal_in_vivo = 动物体内实验；clinical = 临床研究；in_silico = 计算机模拟；unclear = 无法判断。
+  - evidence_overall_level_reason (string) [必填]: 【Reasoning 字段】判断 evidence_overall_level 的依据，引用论文中关键实验描述
+  - model_system_summary (string) [必填]: 摘要层模型说明，1 句话描述实验使用的生物学模型或体系，如 'bovine enamel subsurface demineralization model'
+  - text_to_sequence (string) [必填]: 序列来源定位，格式为章节锚点，如 'Methods > 2.1 Peptide preparation'。回答「sequence_raw 从论文哪里获取」。
+  - text_to_function_summary (string) [必填]: 功能来源定位，格式为章节锚点，如 'Abstract > Results/Conclusion'。回答「为什么认为有这些 summary_functions」。
+  - text_to_evidence_summary (string) [必填]: 证据来源定位，多个锚点以分号分隔，如 'Abstract > Results; Results > CLSM; Results > micro-CT'。回答「证据来自论文哪些位置」。
+  - trace_status (string) [必填]: 允许值：['complete', 'partial', 'missing', 'disputed']。 溯源状态。complete = 核心来源字段（text_to_* 三个字段）均能清楚定位；partial = 能大致定位但不完整；missing = 找不到足够来源；disputed = 不同位置存在冲突。
+  - trace_status_reason (string) [必填]: 【Reasoning 字段】判断 trace_status 的依据，说明溯源情况
+  - curator_note (string or null) [可选]: 人工备注，LLM 抽取阶段填 null，或在有特殊情况时填写简短说明
+
+## FAE 子记录字段（fae_records 数组）
+
+"fae_records" 中的每个元素对应一个功能 × 一种实验方法 × 一组结果。
+若同一功能由两种不同方法支持，应拆成两条独立的 FAE 记录。
+预期数量：根据论文内容，通常为 2-5 条。
+
+  - function_label (string) [必填]: 允许值：['adsorption', 'remineralization', 'mineralization', 'anti_demineralization', 'other']。 本条 FAE 对应的功能标签，与主表 summary_functions 中的单个值对应
+  - evidence_level (string) [必填]: 允许值：['in_vitro', 'ex_vivo', 'animal_in_vivo', 'clinical', 'in_silico', 'unclear']。 本条实验的证据层级，可与主表 evidence_overall_level 不同（主表取最高层级）
+  - assay_category (string) [必填]: 允许值：['adsorption_binding', 'remineralization_outcome', 'mineral_morphology', 'mechanical_property', 'other']。 一级实验类别。adsorption_binding = 吸附/结合实验；remineralization_outcome = 再矿化结果测定；mineral_morphology = 矿物形态表征；mechanical_property = 力学性能测试；other = 其他
+  - validation_method (string) [必填]: 标准值（优先使用）：['CLSM', 'micro-CT', 'nanoindentation', 'SEM', 'other']。 标准化方法名称，优先使用标准值中的名称；不在列表内的方法填写原文方法名
+  - readout_main (string or null) [可选]: 主要测量指标，描述该实验的核心读数类型，如 'fluorescence localization' / 'remineralization rate' / 'hardness'
+  - result_text_summary (string) [必填]: 结果短摘要，1-2 句话描述该方法的关键实验发现，来源于原文结果部分
+  - text_to_evidence (string) [必填]: 本条证据的来源定位，格式为章节锚点，如 'Results > CLSM'。回答「result_text_summary 原文出处在哪里」。
+  - trace_status (string) [必填]: 允许值：['complete', 'partial', 'missing', 'disputed']。 本条 FAE 记录的溯源状态，含义与主表 trace_status 相同
+
+## Reasoning 字段（必填）
+
+对于以下字段，你必须同时提供一个配套的 reasoning 字段，说明判断依据：
+- "interaction_target" → "interaction_target_reason"：引用论文中的关键句或章节位置
+- "summary_functions" → "summary_functions_reason"：说明为何选取这些功能标签
+- "evidence_overall_level" → "evidence_overall_level_reason"：引用论文中关键实验描述
+- "trace_status" → "trace_status_reason"：说明三个 text_to_* 字段的溯源情况
+
+## 关键规则
+
+1. 所有必填字段必须存在且非 null。
+2. 枚举字段必须且只能使用指定的允许值。无法确定时，使用 "other" 或 "unclear"。
+3. "summary_functions" 必须是 JSON 数组（如 ["adsorption", "remineralization"]），最多 3 个值。
+4. "publication_year" 必须是整数（如 2023），不能是字符串。
+5. 章节锚点格式："章节 > 子章节"，如 "Results > 3.1 CLSM"。
+6. "text_to_evidence_summary" 中多个锚点以分号分隔。
+7. 若某字段值无法从论文中确定，可选字段填 null，适用枚举字段填 "unclear"。严禁编造信息。
+8. "curator_note"：无特殊情况填 null。
+
+## 输出示例
+
+{
+  "doi": "10.1016/j.dental.2023.01.001",
+  "pmid": "36854285",
+  "title": "Enamel binding peptide promotes remineralization of early caries lesions",
+  "journal_title": "Dental Materials",
+  "publication_year": 2023,
+  "entity_name_raw": "enamel binding peptide (EBP)",
+  "entity_name_normalized": "WGNYAYK",
+  "sequence_raw": "WGNYAYK",
+  "interaction_target": "HAp",
+  "interaction_target_reason": "论文第2页 Introduction 明确写 'binding to hydroxyapatite crystals'，且 Methods 中使用纯 HAp 粉末进行吸附实验",
+  "summary_functions": [
+    "adsorption",
+    "remineralization"
+  ],
+  "summary_functions_reason": "Abstract 写 'EBP significantly adsorbed onto HAp surface and promoted remineralization'，且 Results 有 CLSM 和 micro-CT 两项独立证据",
+  "evidence_overall_level": "in_vitro",
+  "evidence_overall_level_reason": "全文实验使用 bovine enamel 和 HAp 粉末体外模型，无动物实验或临床数据",
+  "model_system_summary": "bovine enamel subsurface demineralization model",
+  "text_to_sequence": "Methods > 2.1 Peptide preparation",
+  "text_to_function_summary": "Abstract > Results/Conclusion",
+  "text_to_evidence_summary": "Abstract > Results; Results > 3.1 CLSM; Results > 3.2 micro-CT",
+  "trace_status": "complete",
+  "trace_status_reason": "sequence、method（CLSM/micro-CT）、function（adsorption/remineralization）、evidence（体外体系）四类来源字段均有明确锚点",
+  "curator_note": null,
+  "fae_records": [
+    {
+      "function_label": "adsorption",
+      "evidence_level": "in_vitro",
+      "assay_category": "adsorption_binding",
+      "validation_method": "CLSM",
+      "readout_main": "fluorescence localization",
+      "result_text_summary": "FITC 标记的 EBP 在 CLSM 下显示明显的荧光富集于 HAp 表面，对照肽无明显荧光信号",
+      "text_to_evidence": "Results > 3.1 CLSM",
+      "trace_status": "complete"
+    },
+    {
+      "function_label": "remineralization",
+      "evidence_level": "in_vitro",
+      "assay_category": "remineralization_outcome",
+      "validation_method": "micro-CT",
+      "readout_main": "mineral density",
+      "result_text_summary": "micro-CT 显示 EBP 处理组矿物密度较对照组提高 23%，病损深度减少",
+      "text_to_evidence": "Results > 3.2 micro-CT",
+      "trace_status": "complete"
+    }
+  ]
+}
+
+
+──────────────────────────────────────────────────────────────
+【prompt_user（完整）】
+──────────────────────────────────────────────────────────────
+请从以下科学论文全文中抽取 HAp 结合肽信息，按 System Prompt 中的规范输出一个合法的 JSON 对象。
+
+=== 论文全文开始 ===
+Heliyon 10 (2024) e23176
+Available online 1 December 2023
+2405-8440/© 2023 The Author(s).
+Published by Elsevier Ltd.
+This is an open access article under the CC BY-NC-ND license
+(http://creativecommons.org/licenses/by-nc-nd/4.0/).
+Remineralization effects of enamel binding peptide, WGNYAYK, 
+on enamel subsurface demineralization in vitro 
+Yoshihito Miyayoshi , Hidenori Hamba , Keiki Nakamura , Hisako Ishizuka , 
+Takashi Muramatsu * 
+Department of Operative Dentistry, Cariology and Pulp Biology, Tokyo Dental College, 2-9-18, Kandamisaki-cho, Chiyoda-ku, Tokyo 101-0061, 
+Japan   
+A R T I C L E  I N F O   
+Keywords: 
+Biomineralization 
+Early enamel caries 
+Subsurface lesion 
+Peptide 
+A B S T R A C T   
+Objectives: We investigated remineralization effects of enamel binding peptide (EBP), 
+WGNYAYK, on enamel subsurface demineralization in vitro. 
+Methods: Bovine lower incisor crowns were used as subsurface enamel demineralization 
+samples, and changes of EBP binding, remineraliztion rate, hardness and microstructure were 
+investigated. Binding of EBP, remineralization rate, hardness and structural changes were 
+investigated. Fluorescein isothiocyatate (FITC)-labeled EBPs (0.4 mM, 4.0 mM, and 7.0 mM) were 
+applied to the samples for 30 min at 37 ◦C, with sample surfaces and cross-sections observed by 
+confocal laser scanning microscope (CLSM). Mineralization analysis samples were divided into 4 
+experimental groups; distilled water (DW), EBP 0.4 mM, EBP 4.0 mM, and EBP 7.0 mM. Mineral 
+density changes were measured by micro-CT with hardness measured by nano-indentation. 
+Samples were also observed by scanning electron microscope (SEM) for surface and longitudi­
+nal microstructure. 
+Results: CLSM images indicated that increased fluorescence was observed in the surface layer and 
+up to about 20 μm below the surface layer. The remineralization rate was significantly higher for 
+EBP 7.0 mM compared to DW (p = 0.008). Enamel surface hardness was significantly higher in all 
+EBP groups compared to DW (p < 0.05) and was highest in the 7.0 mM group. SEM images 
+showed obscuring of the superficial columnar structure in the 7.0 mM EBP group, indicating 
+subsurface crystalline structure recovery. 
+Conclusion: The results of this study suggest that EBP binds to demineralized enamel and promotes 
+remineralization.   
+1. Introduction 
+Early enamel caries is characterized by subsurface demineralization while the enamel surface is continuous and carious fossae are 
+not yet formed. Subsurface lesions are an early stage of dental caries in which an imbalance between demineralization and remi­
+neralization exists, characterized by the acid-induced dissolution of calcium ions (Ca2+) and phosphate ions (PO4
+3-) from subsurface 
+enamel [1,2]. Recovery from this is induced by remineralization, in which Ca2+ and PO4
+3- from saliva are supplied to these lesions, 
+promoting ion deposition in the demineralized enamel crystalline voids [3]. For this reason, a method to detect remineralization and 
+* Corresponding author. 
+E-mail address: tmuramat@tdc.ac.jp (T. Muramatsu).  
+Contents lists available at ScienceDirect 
+Heliyon 
+journal homepage: www.cell.com/heliyon 
+https://doi.org/10.1016/j.heliyon.2023.e23176 
+Received 9 April 2023; Received in revised form 24 November 2023; Accepted 28 November 2023   
+
+
+Heliyon 10 (2024) e23176
+2
+manage early-stage caries (remineralization therapy) is advocated [4], with the minimal intervention dentistry issued by the FDI 
+World Dental Federation in 2016 [5]. Typical treatments include the application of remineralization-promoting substances such as 
+fluoride, casein phosphopeptide-amorphous calcium phosphate, and nano-hydroxyapatite [6]. Fluoride interrupts the demineraliza­
+tion process and promotes the remineralization of enamel. These properties of fluorides are still used approaches by adding fluoride, 
+for example to increase the hardness of the remineralized enamel. However, there are risk factors such as fluorosis associated with too 
+frequent fluoride intakes in children under 6 years of age [7], and alternative materials have been developed. 
+Biomimetic enamel remineralization attracts attention [8] as a novel approach to treating and preventing early enamel caries by 
+mimicking natural remineralization processes. Biomimetic remineralization is guided by substances that provide a scaffold for hy­
+droxyapatite crystals to nucleate and grow, generating enamel-like structures [9]. The mineral crystals in carious lesions that is re­
+generated by fluoride are disordered, but biomimetic enamel remineralization induces mineral deposition and promotes oriented 
+crystal regeneration. As biomimetic materials, amelogenin, peptides, and calcium phosphate nanoparticles are listed [10]. These 
+specific substances include enamel matrix proteins such as enamel matrix derivative (EMD) [11] and peptides such as P11-4, a 
+self-assembling peptide, and amelogenin-derived peptides [12,13], previously shown to remineralize enamel [11,12]. Polyamido­
+amine (PAMAM) dendrimers, another type of artificial protein, function well for enamel subsurface remineralization [14]. The use of 
+proteins and protein-like molecules is often ineffective, possibly due to the inability of large molecular-weight species to penetrate the 
+tooth subsurface. Indeed, salivary phosphoproteins such as statherin, proline-rich proteins, and histatin inhibit calcium phosphate 
+crystal nucleation and apatite surface precipitation by enamel surface absorption [15]. On the other hand, peptides are biocompatible, 
+specific properties are easily designed, and are more able to permeate than large proteins [16]. Phage display is one method to identify 
+peptides with specific functions [17]. A large random library of peptides with the same number of amino acids is used in this method, 
+identifying sequences that bind strongly to inorganic surfaces. Using this method, the 7 amino acid peptide, WGNYAYK, was identified 
+as the enamel binding peptide (EBP) from a linear peptide library [18]. The in vitro study demonstrated that EBP precipitated 
+amorphous calcium phosphate (ACP) particles from a remineralization solution containing Ca2+ and PO4
+3−, implying involvement in 
+calcium phosphate crystal growth [18]. However, it remains unclear whether EBPs induce the remineralization of enamel subsurface 
+demineralization. We hypothesize that EBPs bind to demineralized enamel and promote remineralization. 
+In this study, we investigate the binding and remineralization properties of EBPs using demineralized enamel subsurface samples 
+that mimic early enamel caries. 
+Fig. 1. Flow chart of the experimental design in the study.  
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+3
+2. Materials and methods 
+2.1. 2-1. Peptide preparation 
+Fluorescein isothiocyatate (FITC)-labeled enamel-specific binding peptide (EBP; amino acid sequence: WGNYAYK) was designed 
+and purchased from BEX (Tokyo, Japan). Lyophilized peptide was dissolved in distilled water (DW) at 10 mg/mL to prepare EBP 
+solutions at concentrations of 0.4 mM, 4.0 mM, and 7.0 mM [18]. 
+2.2. 2-2. Enamel sample preparation 
+The method flowchart is shown in Fig. 1, according to the method by Ishizuka et al. (2022) with modification [19]. Thirty bovine 
+incisors free of visible dental caries and cracks were frozen and preserved after extraction, purchased from Yokohama Meat Corpo­
+ration. (Yokohama, Japan). The incisors were washed under running water to remove all adherent soft tissue. The crowns were cut to 3 
+x 3 × 2 mm using a precision low-speed cutting machine (Isomet, Buehler, Lake Bluff, IL, USA) and embedded into epoxy resin 
+(EpoxiCure 2, Buehler, Lake Bluff, IL, USA). with the smooth enamel surface exposed. The enamel surface was then ground with 
+600–2000 water-resistant abrasive paper and ultrasonically cleaned for 5 min. The edge (1 mm) of the surface was coated with nail 
+varnish (Revlon Red 680; Revlon, New York, NY, USA) and an observation window (2 × 2 mm) was created by exposing the polished 
+enamel surface of each specimen [20]. Holes (1.0 mm in diameter and 0.5 mm in depth) were drilled on the side of each sample with a 
+diamond-pointed bur for analytical alignment [21]. The prepared samples were randomly divided into the DW group, 0.4 mM EBP 
+group, 4.0 mM EBP group, and 7.0 mM EBP group (n = 10 each). In addition, untreated enamel and demineralized enamel were added 
+to the experimental group after 1 week of remineralization for hardness testing. 
+2.3. 2-3. Subsurface demineralization sample preparation 
+Subsurface demineralized lesions were prepared by immersion in demineralization solution (50 mM acetic acid, 2.2 mM Ca(NO3)2, 
+2.2 mM KH2PO4, 5.0 mM NaN3, and 0.5 ppm NaF, pH 4.5) at 37 ◦C for 7–9 days to align the region depths [22,23]. In this study, 
+mineral recovery is determined from mineral loss, which is different from demineralized depth, and is not affected by demineralized 
+period. 
+2.4. 2-4. Confocal laser scanning microscope (CLSM) 
+Samples were prepared separately from the experimental group. To the treated surface was added 10 μL of the FITC-labeled EBP 
+solution, adjusted to each concentration, and allowed to react for 30 min at 37 ◦C, then rinsed and dried. As a control group, 0.4 mM 
+FITC was applied under the same conditions. To confirm enamel binding, some sample surfaces were evaluated by confocal laser 
+microscope (LSM 880 Airy NLO, Zeiss, Jena, Germany). The samples were then cut longitudinally in the center with nippers and 
+polished with water-resistant abrasive paper, then the longitudinal sections were evaluated. We used 3 teeth for each group, and 
+evaluated 3 surfaces and 3 longitudinal regions. 
+2.5. 2-5. Micro-computed tomography (micro-CT) 
+Demineralized specimens were imaged using a micro-CT system (SMX-100CT, Shimadzu, Kyoto, Japan) at a tube voltage of 70 μA 
+and a current of 100 kV. The subsurface region depth of each specimen was confirmed by micro-CT. The X-ray beam was oriented 
+perpendicular to the enamel surface. To prevent drying during imaging, specimens were placed in plastic tubes and secured with a 
+damp wipe at the top. A brass plate 0.2 mm thick was placed in the irradiation path to block low-energy X-rays and reduce line beam 
+hardening [24]. 
+Data were reconstructed into 3D images with a resolution of 1024 x 1024 pixels and a voxel size of 5.0 μm. A reference phantom 
+was also scanned for calibration and included three hydroxyapatite (HAp) disks (TRI/3D-BON, Ratoc, Tokyo, Japan); two with 
+different concentrations (0.50 and 0.70 gHAp/cm3) of HAp crystals mixed with epoxy resin (Epoxicure Resin, Buehler) and one pure 
+HAp disk (3.16 gHAp/cm3) (Cellyard, Hoya, Tokyo, Japan). Enamel specimens with mean thickness of 1194 ± 96.7 μm were selected. 
+2.6. 2-6. Mineral increase rate by remineralization 
+Each sample was immersed in remineralization solution (0.9 mM KH2PO4, 1.5 mM CaCl2, 130 mM KCl, and 1.0 mM NaN3, 20 mM 
+HEPES pH 7.0) at 37 ◦C for 7 days [19]. This solution was changed daily [25]. After remineralization, specimens were photographed 
+with a micro-CT system (SMX-100CT, Shimadzu). 3D evaluation software (TRI/3D-BON, Ratoc, Tokyo, Japan) was used to align the 
+mineral density profile by referring to the outer surface and reference hole of the CT data after demineralization and remineralization, 
+and the mineral density profile was measured. Assuming the mineral density of the untreated enamel around the treated surface to be 
+100 %, the amount of mineral decreased after demineralization (ΔZd) and remineralization (ΔZr) was determined, from which the 
+mineral change was calculated and divided by the mineral decrease after demineralization (ΔZd), from which the rate of mineral 
+increase (%R) was obtained. 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+4
+%R = [(ΔZd-ΔZr) / ΔZd × 100]
+2.7. 2-7. Hardness test 
+In addition to the experimental group after 1 week of remineralization, untreated enamel and demineralized enamel were subjected 
+to surface hardness testing using Nano-indentation (ENT-1100a, ELIONIX, Tokyo, Japan) (n = 6 each). Specimens were adjusted to a 
+thickness of 2 mm, fixed to the stage with instant adhesive, and hardness (N/mm2) was measured with a test load of 20 mN. Twenty 
+indentations were formed in the center of each specimen [26]. The fused silica was measured and calibrated before each test for 
+reference. Enamel specimens with mean of the sound area hardness of 33256 ± 5625.8 N/mm2 were selected. 
+Fig. 2. CLSM observation of surface (I) and cross sections (II) FITC-labeled EBP fluorescence intensity increased in the superficial and cross sections 
+compared to the control (FITC). 
+In the surface observation (I), EBP showed an increase in fluorescence intensity compared to the control (a). EBP 0.4 mM group (c) showed lower 
+fluorescent intensity compared to the 4.0 mM (e) and 7.0 mM (g) groups. Fluorescence indicating EBP was observed in the 4.0 mM (e) and 7.0 mM 
+(g) groups throughout the surface layer covering the enamel rod area and inter-rod enamel area 
+In the longitudinal section (II), increased fluorescence was observed in the surface layer and up to about 20 μm below the surface layer. An increase 
+in fluorescence intensity was confirmed for all EBP (d, f and h) concentrations compared to the control DW (b). 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+5
+2.8. 2-8. Scanning electron microscope (SEM) 
+A portion of the remineralized specimen was deposited with carbon, and the surface layer and longitudinal section microstructure 
+was observed with a scanning electron microscope (SEM, SU-6600, Hitachi, Tokyo, Japan). The longitudinal samples were prepared in 
+the same manner as the CLSM samples. The surface layer was observed at 7,000x magnification and the longitudinal section at 2,000x 
+magnification (n = 3 each). 
+2.9. 2-9. Statistical analysis 
+All data were statistically tested for Kolmogorov–Smirnov test and the Levine’s test was 
+applied to test for equal variance between the groups, and processed by One-way anova with. 
+Welch’s correction and post hoc comparison by the Games-Howell test a 5 % significance level. All statistics and measure of effect 
+size and power were performed in a statistical program. 
+(SPSS Version 27 for Windows, SPSS, Chicago, IL, USA). 
+3. Results 
+3.1. CLSM findings 
+In the surface observation (I), EBP showed an increase in fluorescence intensity compared to the control (Fig. 2a). EBP 0.4 mM 
+group (Fig. 2c) showed lower fluorescent intensity compared to the 4.0 mM (Fig. 2e) and 7.0 mM (Fig. 2g) groups. Fluorescence 
+indicating EBP was observed in the 4.0 mM (Fig. 2e) and 7.0 mM (Fig. 2g) groups throughout the surface layer covering the enamel rod 
+area and inter-rod enamel area. 
+In the longitudinal section (II), increased fluorescence was observed in the surface layer and up to about 20 μm below the surface 
+Fig. 3. Two-dimensional micro-focus X-ray computed tomography (micro-CT) images of the same specimens. X-ray transmission image showing 
+enamel subsurface lesions after demineralization. 
+In all groups, the radiopacity increased post-remineralization (a, b, c, d). 
+(a) DW, (b) EBP 0.4 mM, (c) EBP 4.0 mM and (d) EBP 7.0 mM. Bars = 500 μm. 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+6
+layer. An increase in fluorescence intensity was confirmed for all EBP (Fig. 2d, f and 2h) concentrations compared to the control DW 
+(Fig. 2b). Representative CLSM images are shown in Fig. 2. 
+3.2. Micro-CT and remineralization rate 
+In all groups, subsurface demineralization was observed, in which the most superficial layer showed a white lineation and an 
+increase in the underlying layer permeability. In addition, an increase in radiopaque opacity of the demineralized area was observed in 
+the micro-CT image on the 7th day of remineralization. Representative 2D images of the micro-CT are shown in Fig. 3. In all groups, the 
+radiopacity increased post-remineralization (Fig. 3a, b, 3c and 3d). Representative 3D images of the micro-CT are shown in Fig. 4. X- 
+ray transmission image showing enamel subsurface lesions after demineralization (Fig. 4a). 
+The radiopacity increased post-remineralization (Fig. 4b). 
+The mineral profiles of each experimental group are shown in Fig. 5. There was a decrease in mineral density at approximately 30 
+μm below the surface compared to the surface, resembling the subsurface demineralization characteristic of early caries. In all groups, 
+a mineral density increase was observed after one week of immersion in the remineralization solution(Fig. 5a, b, 5c and 5d). 
+The remineralization rates are shown in Table 1. The calculated effect size was 0.259 and the power achieved was 0.815. There was 
+no significant difference in the recalcification rate among the DW, 0.4 mM, and 4.0 mM groups, and among the 0.4 mM, 4.0 mM, and 
+7.0 mM groups, but there was a significant difference between DW and 7.0 mM (p = 0.008). 
+3.2.1. Hardness changes in remineralized enamel after EBP application 
+Nano-indentation results are shown in Table 2. The unimpaired enamel showed the highest values, while the demineralized enamel 
+showed the lowest ones. The hardness in the DW group was significantly lower than that in the demineralized group (p < 0.001), and in 
+all EBP groups (p < 0.05). The hardness in the EBP 0.4 mM and 4.0 mM groups did not differ significantly(p = 1.00), and the 7.0 mM 
+group showed the highest hardness. However, the hardness in the EBP 7.0 mM group did not recover to the level of unimpaired enamel. 
+SEM observation. 
+Representative SEM images are shown in Fig. 6. Unimpaired enamel surface was smooth with polishing scratches (Fig. 6a). After 
+demineralization, the enamel rod structure of the surface layer was clearly observed (Fig. 6b). Inter-prism gaps were seen in dem­
+ineralized enamel, DW (Fig. 6c), and EBP 0.4 mM (Fig. 6d) and 4.0 mM groups (Fig. 6e). Obscured inter-rod structures were observed 
+in the EBP 7.0 mM group. On the other hand, in the 7.0 mM group, the enamel prism structure was unclear (Fig. 6f). In the longitudinal 
+section, the remaining surface layer and the loss of subsurface structure were seen in all groups (Fig. 7a, b, 7c, 7d 7e, and 7f). In the 7.0 
+mM group, crystal accumulation was observed in the surface region (Fig. 7f). 
+4. Discussion 
+In this study, the binding and remineralizing effects of EBPs to demineralized enamel were evaluated. We preliminarily carried out 
+experiments using three peptides identified in the previous study by Mao et al. (2016) [18]. WGNYAYK showed the highest remi­
+neralizing effect, and we decided to employ this peptide. The results suggest that EBPs bind to and penetrate demineralized enamel and 
+promote its remineralizing effect. Therefore, the hypothesis proposed in this study was supported. The preliminary data on WGNYAYK 
+as supplementary material is not shown. 
+Our results showed EBP bound to the enamel surface layer, with an increase in EBP fluorescence intensity. Previous studies re­
+ported peptide binding to enamel [13,18]. In this study, we used FITC-labeled EBP to confirm EBP binding to enamel, as the previous 
+study did not visually confirm this [18]. A previous study reported the penetration of a fluorescent dye-labeled protein into longi­
+tudinal enamel sections [27]. Longitudinal section images showed FITC localization approximately 20 μm below the surface layer, 
+Fig. 4. Representative three-dimensional micro-focus X-ray computed tomography (micro-CT) images of the same specimens. X-ray transmission 
+image showing enamel subsurface lesions after demineralization (a). 
+The radiopacity increased post-remineralization (b). Bars = 1000 μm. 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+7
+implying involvement in mineral uptake. Increasing EBP concentration was associated with an increase in fluorescent intensity of the 
+surface layer and deeper regions, suggesting concentration-dependent binding and permeabilization. The method in our study differs 
+from that in the previous study by Mao et al. [18]. In our study, we used demineralized enamel as in a clinical setting. It is possible that 
+the roughening of the surface layer and disruption of the subsurface structure resulted in more bonding and penetration compare to the 
+sound enamel surface. 
+Micro-CT is a nondestructive technique to assess mineral content primarily used in mineral density studies and mineral tissue 
+structure, such as bones and teeth [28]. It is useful in evaluating sample remineralization over time [21]. Micro-CT results showed that 
+the most superficial layer remained after 7–9 days of demineralization, while the mineral profile showed a subsurface layer loss, 
+confirming subsurface demineralization. In addition, after remineralization, the subsurface demineralized area radiopacity increased 
+Fig. 5. Mean mineral density profiles of representative specimens from experimental groups. Blue line: after demineralization; orange line: after 1 
+week of remineralization. 
+Mineral density increased in all groups after 1 week of remineralization (a, b, c, d). 
+(a) DW, (b) 0.4 mM EBP, (c) 4.0 mM EBP and (d) 7.0 mM EBP. 
+Table 1 
+Games Howell test of Percentage of Remineralization (%R).   
+mean (%)  
+Mean Difference 
+Standard Error 
+p-value 
+95 % Confidence Interval       
+Lower Bound 
+Upper Bound 
+DW 
+10.41 
+EBP 0.4 mM 
+−0.807 
+3.008 
+0.993 
+−9.73 
+8.116   
+EBP 4.0 mM 
+−2.214 
+3.073 
+0.887 
+−11.345 
+6.918   
+EBP 7.0 mM 
+−10.706 
+2.726 
+0.008* 
+−18.723 
+−2.688 
+EBP 0.4 mM 
+11.21 
+DW 
+0.807 
+3.008 
+0.993 
+−8.116 
+9.73   
+EBP 4.0 mM 
+−1.407 
+3.973 
+0.984 
+−12.635 
+9.822   
+EBP 7.0 mM 
+−9.899 
+3.711 
+0.069 
+−20.401 
+0.604 
+EBP 4.0 mM 
+12.62 
+DW 
+2.214 
+3.073 
+0.887 
+−6.918 
+11.345   
+EBP 0.4 mM 
+1.4067 
+3.973 
+0.984 
+−9.822 
+12.635   
+EBP 7.0 mM 
+−8.492 
+3.764 
+0.147 
+−19.151 
+2.167 
+EBP 7.0 mM 
+21.11 
+DW 
+10.706 
+2.726 
+0.008* 
+2.688 
+18.723   
+EBP 0.4 mM 
+9.899 
+3.711 
+0.069 
+−0.6039 
+20.401   
+EBP 4.0 mM 
+8.492 
+3.764 
+0.147 
+−2.167 
+19.151 
+The rate of remineralization of EBP 7.0 mM treatment was significantly higher than that of DW treatment (p = 0.008). An asterisk in the p-value 
+indicates a significant difference. 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+8
+and %R of EBP 7.0 mM treatment was higher than that of DW treatment. These results indicate that EBP promotes subsurface 
+remineralization. EBP 4.0 mM did not improve mineral recovery because a certain concentration is required before passing through the 
+surface layer and permeating inside. The increased concentration and supersaturation may have allowed EBP to rapidly penetrate the 
+enamel substructure. 
+While most studies evaluated hard tissue remineralization by measuring mineral content [29,30], it is also important to evaluate 
+mechanical properties to assess the remineralized hard tissue quality [31]. Enamel mechanical properties are strongly related to 
+mineral content [32], and mineral loss causes decreased enamel surface hardness and modulus [33]. Nano-indentation, used in this 
+study, measures indentation depth by displacement, rather than by visually measuring indentation, and is often used to measure 
+demineralized enamel [34]. The results of this study showed that the hardness in demineralized areas was significantly lower than that 
+in unimpaired areas. Compared to immediately after demineralization, each experimental group showed significantly higher hardness 
+values, demonstrating that remineralization restores hardness. In addition, the hardness of all EBP groups was significantly higher than 
+that of the DW group, demonstrating the hardness increase due to the remineralization-promoting effect of EBPs. 
+In this study, the EBP concentration of up to 7.0 mM demonstrated remineralization, but the concentration dependency was 
+incompletely confirmed. The peptide concentration of 7 mM was the limitation in this study, and the optimal concentration of EBP may 
+be higher. On the other hand, the use of high concentrations or long peptide sequences does not always improve the degree of hardness 
+recovery as shown by Hsu et al. [35]. Further concentration studies are necessary to prove the concentration dependent manner. 
+Microstructurally sediment-like structures were observed on the surface layer and, in the 7.0 mM EBP group, the interrod structures 
+were obscured, resembling ACP accumulation [18]. The microstructural findings of this study reflected those of Hsu et al., who re­
+ported that the 8DSS peptide (derived from the human dentin phosphoprotein) resulted in mineral deposition to the enamel rods and 
+interrod spaces of the demineralized enamel [36]. This study implies that hardness recovery occurs due to surface-layer structure 
+changes. 
+Protein penetration along with mineral evaluation and microstructural changes in longitudinal sections was reported [13,37]. 
+However, previous studies do not appear to discuss the relationship between the ability of peptides to permeate the tooth and 
+microstructural changes. CLSM data identified FITC-labeled EBP localization approximately 20 μm below the surface layer, but lon­
+gitudinal SEM sections identified no differences in this area except in the 7.0 mM group. Furthermore, some subsurface crystalline 
+structure recovery was observed, with increased mineral density in the demineralized area approximately 20 μm below the surface for 
+the 7.0 mM group. These results suggest that the ability of EBP to permeate at 7.0 mM promoted mineral uptake and subsurface 
+Table 2 
+Games Howell test of Enamel surface hardness by nano-indentation.   
+mean (N/mm2) 
+Mean Difference 
+Standard Error 
+p-value 
+95 % Confidence Interval       
+Lower Bound 
+Upper Bound 
+Sound 
+32141.780 
+Dem 
+28706.363 
+572.777 
+<.001* 
+26315.841 
+31096.885   
+DW 
+25022.224 
+582.907 
+<.001* 
+22650.654 
+27393.794   
+EBP 0.4 mM 
+22720.238 
+634.279 
+<.001* 
+20357.570 
+25082.906   
+EBP 4.0 mM 
+22754.441 
+724.261 
+<.001* 
+20214.783 
+25294.098   
+EBP 7.0 mM 
+18156.085 
+727.572 
+<.001* 
+15607.226 
+20704.944 
+Dem 
+3435.417 
+Sound 
+−28706.363 
+572.777 
+<.001* 
+−31096.885 
+−26315.841   
+DW 
+−3684.139 
+171.298 
+<.001* 
+−4298.575 
+−3069.703   
+EBP 0.4 mM 
+−5986.125 
+303.105 
+<.001* 
+−7189.015 
+−4783.235   
+EBP 4.0 mM 
+−5951.922 
+462.726 
+<.001* 
+−7861.786 
+−4042.059   
+EBP 7.0 mM 
+−10550.278 
+467.892 
+<.001* 
+−12482.801 
+−8617.755 
+DW 
+7119.556 
+Sound 
+−25022.224 
+582.907 
+<.001* 
+−27393.794 
+−22650.654   
+Dem 
+3684.139 
+171.298 
+<.001* 
+3069.703 
+4298.575   
+EBP 0.4 mM 
+−2301.986 
+321.839 
+0.001* 
+−3505.668 
+−1098.304   
+EBP 4.0 mM 
+−2267.783 
+475.209 
+0.022* 
+−4160.142 
+−375.425   
+EBP 7.0 mM 
+−6866.139 
+480.240 
+<.001* 
+−8780.996 
+−4951.282 
+EBP 0.4 mM 
+9421.542 
+Sound 
+−22720.238 
+634.279 
+<.001* 
+−25082.906 
+−20357.570   
+Dem 
+5986.125 
+303.105 
+<.001* 
+4783.235 
+7189.015   
+DW 
+2301.986 
+321.839 
+0.001* 
+1098.304 
+3505.668   
+EBP 4.0 mM 
+34.203 
+536.985 
+1 
+−1899.968 
+1968.374   
+EBP 7.0 mM 
+−4564.153 
+541.443 
+<.001* 
+−6517.590 
+−2610.716 
+EBP 4.0 mM 
+9387.339 
+Sound 
+−22754.441 
+724.261 
+<.001* 
+−25294.098 
+−20214.783   
+Dem 
+5951.922 
+462.726 
+<.001* 
+4042.059 
+7861.786   
+DW 
+2267.783 
+475.209 
+0.022* 
+375.425 
+4160.142   
+EBP 0.4 mM 
+−34.203 
+536.985 
+1 
+−1968.374 
+1899.968   
+EBP 4.0 mM 
+−4598.356 
+644.518 
+<.001* 
+−6837.033 
+−2359.678 
+EBP 7.0 mM 
+13985.694 
+Sound 
+−18156.085 
+727.572 
+<.001* 
+−20704.944 
+−15607.226   
+Dem 
+10550.278 
+467.892 
+<.001* 
+8617.755 
+12482.801   
+DW 
+6866.139 
+480.240 
+<.001* 
+4951.282 
+8780.996   
+EBP 0.4 mM 
+4564.153 
+541.443 
+<.001* 
+2610.716 
+6517.590   
+EBP 4.0 mM 
+4598.356 
+644.518 
+<.001* 
+2359.678 
+6837.033 
+Unimpaired enamel showed the highest hardness and demineralized enamel showed the lowest hardness. 
+There were no significant differences among the 0.4 mM and 4.0 mM groups, but the 7.0 mM group showed significantly higher hardness (p < 0.05). 
+An asterisk in the p-value indicates a significant difference. 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+9
+microstructural changes. 
+The predicted mechanism of EBP remineralization is shown in Fig. 8, where Ding et al. demonstrated amelogenin-derived peptide 
+QP5 binding to the enamel surface, ACP stabilization, hydroxyapatite crystallization control, and promotion of remineralization in 
+caries lesions [38]. EBP is assumed to interact with calcium because there was a high consumption of calcium ions when EBPs were 
+immersed in remineralizing solution [18]. EBP may function similarly, binding to and penetrating demineralized enamel and pro­
+moting mineral uptake, thereby generating ACP and crystallizing HAp. We will conduct elemental analysis to analyze newly formed 
+crystals and investigate the characteristics of EBPs to understand the remineralization mechanism of EBP as further studies. Based on 
+the results of the present and further studies, we will consider topical application of EBPs on surface of early enamel caries clinically. 
+5. Conclusion 
+At higher concentrations, EBP binds to demineralized enamel to promote remineralization under the present experimental 
+conditions. 
+Data Availability Statement 
+Data included in article/supp. material/referenced in article. 
+Fig. 6. enamel surfaces SEM images. 
+The surface layer was observed at 7,000x magnification. Unimpaired enamel surface was smooth with polishing scratches (a). Inter-prism gaps were 
+seen in demineralized enamel (b), DW (c), and EBP 0.4 mM (d) and 4.0 mM (e) groups. Obscured inter-rod structures were observed in the EBP 7.0 
+mM (f) group. 
+(a) Unimpaired enamel, (b) Demineralization, (c) DW, (d) EBP 0.4 mM, (e) EBP 4.0 mM, (f) EBP 7.0 mM. Bars = 5 μm. 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+10
+Clinical significance 
+EBPs promote remineralization, supporting EBP-based early treatment of enamel caries.                                                                               
+(continued on next page) 
+Fig. 7. Cross-sectional SEM images of enamel specimens. 
+The longitudinal section was observed at 2,000x magnification. Unimpaired enamel (a) was smooth, but in the demineralized enamel (b), subsurface 
+lesion-like structures were seen, DW (c), EBP 0.4 mM (d), EBP 4.0 mM (e), and 7.0 mM (f) groups. Note crystal accumulation (white arrow) was seen 
+in subsurface regions of the 7.0 mM group (f). 
+(a) Unimpaired enamel. (b) Demineralization. (c) DW. (d) EBP 0.4 mM. (e) EBP 4.0 mM. (f) EBP 7.0 mM. Bars = 20 μm. 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+11
+(continued)                                                                                                        
+CRediT authorship contribution statement 
+Yoshihito Miyayoshi: Writing – original draft, Investigation. Hidenori Hamba: Visualization, Supervision, Data curation, 
+Conceptualization. Keiki Nakamura: Visualization, Resources, Methodology. Hisako Ishizuka: Resources, Methodology, Formal 
+analysis. Takashi Muramatsu: Writing – review & editing, Supervision, Methodology, Conceptualization. 
+Declaration of competing interest 
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to 
+influence the work reported in this paper. 
+Acknowledgments 
+We thank Professor Seikou Shintani (Department of Pediatric Dentistry, Tokyo Dental College) for his helpful suggestions. 
+This work was supported by the Japanese Ministry of Education, Culture, Sports, Science and Technology (Grant-in-Aid No. 
+21K09960). 
+References 
+[1] C. Gonz´alez-Cabezas, The chemistry of caries: remineralization and demineralization events with direct clinical relevance, Dent Clin North Am 54 (2010) 
+469–478, https://doi.org/10.1016/j.cden.2010.03.004. 
+Fig. 8. Predicted remineralization mechanism in demineralized enamel after EBP application. 
+EBP binds to enamel (a), taking up Ca2+ and PO4
+3- from the remineralization solution (b) and producing ACP (c), which may promote crystallization 
+within the demineralized enamel (d). 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+
+Heliyon 10 (2024) e23176
+12
+[2] J. Arends, J. Christoffersen, The nature of early caries lesions in enamel, J. Dent. Res. 65 (1986) 2–11, https://doi.org/10.1177/00220345860650010201. 
+[3] N.J. Cochrane, F. Cai, N.L. Huq, M.F. Burrow, E.C. Reynolds, New approaches to enhanced remineralization of tooth enamel, J. Dent. Res. 89 (2010) 1187–1197, 
+https://doi.org/10.1177/0022034510376046. 
+[4] J.D. Featherstone, S. Dom´ejean, Minimal intervention dentistry: part 1. From ’compulsive’ restorative dentistry to rational therapeutic strategies, Br. Dent. J. 
+213 (2012) 441–445, https://doi.org/10.1038/sj.bdj.2012.1007. 
+[5] J.E. Frencken, Atraumatic restorative treatment and minimal intervention dentistry, Br. Dent. J. 223 (2017) 183–189, https://doi.org/10.1038/sj.bdj.2017.664. 
+[6] P.R.A. de Oliveira, L. Barreto, M.A. Tostes, Effectiveness of CPP-ACP and fluoride products in tooth remineralization, Int. J. Dent. Hyg. 20 (2022) 635–642, 
+https://doi.org/10.1111/idh.12542. 
+[7] M. Bossù, M. Saccucci, A. Salucci, G. Giorgio, E. Bruni, D. Uccelletti, M. Sarto, G. Familiari, M. Relucenti, A. Polimeni, Enamel remineralization and repair 
+results of Biomimetic Hydroxyapatite toothpaste on deciduous teeth: an effective option to fluoride toothpaste, J. Nanobiotechnol. 17 (2019) 17, https://doi. 
+org/10.1186/s12951-019-0454-6. 
+[8] M. Pandya, T.G.H. Diekwisch, Enamel biomimetics-fiction or future of dentistry, Int. J. Oral Sci. 11 (2019) 8, https://doi.org/10.1038/s41368-018-0038-6. 
+[9] V. Mus¸at, E.M. Anghel, A. Zaharia, I. Atkinson, O.C. Mocioiu, M. Bus¸il˘a, P. Alexandru, A Chitosan-agarose polysaccharide-based hydrogel for biomimetic 
+remineralization of dental enamel, Biomolecules 11 (2021), https://doi.org/10.3390/biom11081137. 
+[10] Y. Li, Q. Bai, M. Wen, D. Ma, Y. Lin, J. Chu, Recombinant amelogenin peptide TRAP promoting remineralization of early enamel caries: an in vitro study, Front. 
+Physiol. (2023) 14, https://doi.org/10.3389/fphys.2023.1076265. 
+[11] Y. Cao, M.L. Mei, Q.L. Li, E.C. Lo, C.H. Chu, Enamel prism-like tissue regeneration using enamel matrix derivative, J. Dent. 42 (2014) 1535–1542, https://doi. 
+org/10.1016/j.jdent.2014.08.014. 
+[12] M. Alkilzy, R.M. Santamaria, J. Schmoeckel, C.H. Splieth, Treatment of carious lesions using self-assembling peptides, Adv. Dent. Res. 29 (2018) 42–47, https:// 
+doi.org/10.1177/0022034517737025. 
+[13] Z. Xiao, K. Que, H. Wang, R. An, Z. Chen, Z. Qiu, M. Lin, J. Song, J. Yang, D. Lu, M. Shen, B. Guan, Y. Wang, X. Deng, X. Yang, Q. Cai, J. Deng, L. Ma, X. Zhang, 
+X. Zhang, Rapid biomimetic remineralization of the demineralized enamel surface using nano-particles of amorphous calcium phosphate guided by chimaeric 
+peptides, Dent. Mater. 33 (2017) 1217–1228, https://doi.org/10.1016/j.dental.2017.07.015. 
+[14] K. Liang, S. Wang, S. Tao, S. Xiao, H. Zhou, P. Wang, L. Cheng, X. Zhou, M.D. Weir, T.W. Oates, J. Li, H.H.K. Xu, Dental remineralization via poly (amido amine) 
+and restorative materials containing calcium phosphate nanoparticles, Int. J. Oral Sci. 11 (2019) 15, https://doi.org/10.1038/s41368-019-0048-z. 
+[15] M.J. Romero, S. Nakashima, T. Nikaido, A. Sadr, J. Tagami, In vitro dentine remineralization with a potential salivary phosphoprotein homologue, Arch. Oral 
+Biol. 68 (2016) 35–42, https://doi.org/10.1016/j.archoralbio.2016.03.014. 
+[16] K.H. Chan, W.H. Lee, S. Zhuo, M. Ni, Harnessing supramolecular peptide nanotechnology in biomedical applications, Int J Nanomedicine 12 (2017) 1171–1182, 
+https://doi.org/10.2147/IJN.S126154. 
+[17] K. Hashimoto, M. Yoshinari, K. Matsuzaka, K. Shiba, T. Inoue, Identification of peptide motif that binds to the surface of zirconia, Dent. Mater. J. 30 (2011) 
+935–940, https://doi.org/10.4012/dmj.2011-161. 
+[18] J. Mao, X. Shi, Y.B. Wu, S.Q. Gong, Identification of specific hydroxyapatite {001} binding heptapeptide by phage display and its nucleation effect, Materials 9 
+(2016), https://doi.org/10.3390/ma9080700. 
+[19] H. Ishizuka, H. Hamba, K. Nakamura, Y. Miyayoshi, H. Kumura, T. Muramatsu, Effects of bovine milk osteopontin on in vitro enamel remineralization as a 
+topical application prior to immersion in remineralizing solutions with/without fluoride, Dent. Mater. J. 42 (2023) 140–146, https://doi.org/10.4012/ 
+dmj.2022-140. 
+[20] K. Nakamura, H. Hamba, Y. Miyayoshi, H. Ishizuka, T. Muramatsu, In vitro remineralization of enamel with a solution containing casein and fluoride, Dent. 
+Mater. J. 40 (2021) 1109–1114, https://doi.org/10.4012/dmj.2020-383. 
+[21] H. Hamba, T. Nikaido, G. Inoue, A. Sadr, J. Tagami, Effects of CPP-ACP with sodium fluoride on inhibition of bovine enamel demineralization: a quantitative 
+assessment using micro-computed tomography, J. Dent. 39 (2011) 405–413, https://doi.org/10.1016/j.jdent.2011.03.005. 
+[22] M. Fan, M. Zhang, H.H.K. Xu, S. Tao, Z. Yu, J. Yang, H. Yuan, X. Zhou, K. Liang, J. Li, Remineralization effectiveness of the PAMAM dendrimer with different 
+terminal groups on artificial initial enamel caries in vitro, Dent. Mater. 36 (2020) 210–220, https://doi.org/10.1016/j.dental.2019.11.015. 
+[23] X. Lv, Y. Yang, S. Han, D. Li, H. Tu, W. Li, X. Zhou, L. Zhang, Potential of an amelogenin based peptide in promoting reminerlization of initial enamel caries, 
+Arch. Oral Biol. 60 (2015) 1482–1487, https://doi.org/10.1016/j.archoralbio.2015.07.010. 
+[24] R.J. Jennings, A method for comparing beam-hardening filter materials for diagnostic radiology, Med. Phys. 15 (1988) 588–599, https://doi.org/10.1118/ 
+1.596210. 
+[25] K.W. Zan, K. Nakamura, H. Hamba, A. Sadr, T. Nikaido, J. Tagami, Micro-computed tomography assessment of root dentin around fluoride-releasing 
+restorations after demineralization/remineralization, Eur. J. Oral Sci. 126 (2018) 390–399, https://doi.org/10.1111/eos.12558. 
+[26] H.Y. Chung, C.C. Li, Microstructure and nanomechanical properties of enamel remineralized with asparagine-serine-serine peptide, Mater Sci Eng C Mater Biol 
+Appl 33 (2013) 969–973, https://doi.org/10.1016/j.msec.2012.11.031. 
+[27] J.R. Fernando, P. Shen, G.D. Walker, Y. Yuan, D.P. Stanton, C. Reynolds, E.C. Reynolds, Effects of bovine serum albumin and high pH pre-treatment on the 
+remineralisation of enamel subsurface lesions in vitro, Caries Res. 54 (2020) 36–42, https://doi.org/10.1159/000502337. 
+[28] S.R. Stock, J. Barss, T. Dahl, A. Veis, J.D. Almer, X-ray absorption microtomography (microCT) and small beam diffraction mapping of sea urchin teeth, J. Struct. 
+Biol. 139 (2002) 1–12, https://doi.org/10.1016/s1047-8477(02)00500-2. 
+[29] A.B. Neves, T.G. Bergstrom, A. Fonseca-Gonçalves, T.M.P. Dos Santos, R.T. Lopes, A. de Almeida Neves, Mineral density changes in bovine carious dentin after 
+treatment with bioactive dental cements: a comparative micro-CT study, Clin. Oral Invest. 23 (2019) 1865–1870, https://doi.org/10.1007/s00784-018-2644-2. 
+[30] P. K¨orner, J.A. Schleich, D.B. Wiedemeier, T. Attin, F.J. Wegehaupt, Effects of additional use of bioactive glasses or a hydroxyapatite toothpaste on 
+remineralization of artificial lesions in vitro, Caries Res. 54 (2020) 336–342, https://doi.org/10.1159/000510180. 
+[31] L.E. Bertassoni, S. Habelitz, S.J. Marshall, G.W. Marshall, Mechanical recovery of dentin following remineralization in vitro–an indentation study, J. Biomech. 
+44 (2011) 176–181, https://doi.org/10.1016/j.jbiomech.2010.09.005. 
+[32] R. Alkattan, F. Lippert, Q. Tang, G.J. Eckert, M. Ando, The influence of hardness and chemical composition on enamel demineralization and subsequent 
+remineralization, J. Dent. 75 (2018) 34–40, https://doi.org/10.1016/j.jdent.2018.05.002. 
+[33] C.P. Wang, S.B. Huang, Y. Liu, J.Y. Li, H.Y. Yu, The CPP-ACP relieved enamel erosion from a carbonated soft beverage: an in vitro AFM and XRD study, Arch. 
+Oral Biol. 59 (2014) 277–282, https://doi.org/10.1016/j.archoralbio.2013.11.018. 
+[34] M.E. Dickinson, K.V. Wolf, A.B. Mann, Nanomechanical and chemical characterization of incipient in vitro carious lesions in human dental enamel, Arch. Oral 
+Biol. 52 (2007) 753–760, https://doi.org/10.1016/j.archoralbio.2007.02.007. 
+[35] H.Y. Chung, K.C. Huang, Effects of peptide concentration on remineralization of eroded enamel, J. Mech. Behav. Biomed. Mater. 28 (2013) 213–221, https:// 
+doi.org/10.1016/j.jmbbm.2013.08.004. 
+[36] C.C. Hsu, H.Y. Chung, J.M. Yang, W. Shi, B. Wu, Influence of 8DSS peptide on nano-mechanical behavior of human enamel, J. Dent. Res. 90 (2011) 88–92, 
+https://doi.org/10.1177/0022034510381904. 
+[37] F. Hua, J. Yan, S. Zhao, H. Yang, H. He, In vitro remineralization of enamel white spot lesions with a carrier-based amorphous calcium phosphate delivery 
+system, Clin. Oral Invest. 24 (2020) 2079–2089, https://doi.org/10.1007/s00784-019-03073-x. 
+[38] L. Ding, S. Han, K. Wang, S. Zheng, W. Zheng, X. Peng, Y. Niu, W. Li, L. Zhang, Remineralization of enamel caries by an amelogenin-derived peptide and fluoride 
+in vitro, Regen Biomater 7 (2020) 283–292, https://doi.org/10.1093/rb/rbaa003. 
+Y. Miyayoshi et al.                                                                                                                                                                                                    
+
+=== 论文全文结束 ===
+
+
+──────────────────────────────────────────────────────────────
+【raw_response（LLM 原始输出，完整）】
+──────────────────────────────────────────────────────────────
+<think>
+Let me carefully analyze this scientific paper and extract the HAp-binding peptide information according to the system prompt requirements.
+
+The paper is titled "Remineralization effects of enamel binding peptide, WGNYAYK, on enamel subsurface demineralization in vitro" published in Heliyon in 2024 (published December 1, 2023).
+
+Key information to extract:
+
+**Paper-level fields:**
+
+1. **doi**: 10.1016/j.heliyon.2023.e23176
+2. **pmid**: null (not provided in the paper)
+3. **title**: "Remineralization effects of enamel binding peptide, WGNYAYK, on enamel subsurface demineralization in vitro"
+4. **journal_title**: "Heliyon"
+5. **publication_year**: 2024
+6. **entity_name_raw**: "enamel binding peptide (EBP)"
+7. **entity_name_normalized**: "WGNYAYK"
+8. **sequence_raw**: "WGNYAYK"
+9. **interaction_target**: "enamel" - The paper focuses on demineralized enamel subsurface, not pure HAp crystals. The peptide binds to demineralized enamel and promotes remineralization. Based on the definition, "enamel" = 含 HAp 的生物矿化组织.
+10. **interaction_target_reason**: The paper uses bovine enamel samples, and the peptide binds to demineralized enamel. From Introduction: "We hypothesize that EBPs bind to demineralized enamel and promote remineralization." And from Conclusion: "EBP binds to demineralized enamel and promotes remineralization."
+11. **summary_functions**: ["adsorption", "remineralization"] - The paper shows binding/adsorption of EBP to enamel (CLSM evidence) and promotion of remineralization (micro-CT and hardness evidence)
+
+
+12. **summary_functions_reason**: Multiple experimental methods validate both the peptide's capacity to adsorb onto enamel surfaces and stimulate remineralization processes. CLSM imaging demonstrates fluorescence localization, while micro-CT and hardness measurements confirm mineral recovery. The results show significant enhancement in both binding and mineral density compared to control groups.
+
+13. **evidence_overall_level**: in_vitro - The study uses bovine enamel samples in a controlled laboratory setting without clinical or animal subjects.
+
+14. **evidence_overall_level_reason**: Experimental work conducted entirely in vitro using bovine lower incisor crowns as the primary model system.
+
+15. **model_system_summary**: Bovine enamel subsurface demineralization model established through experimental protocols.
+
+16. **text_to_sequence**: Methods > 2.1 Peptide preparation section provides sequence information.
+
+17. **text_to_function_summary**: Abstract articulates the primary conclusions regarding peptide function and efficacy.
+
+18. **text_to_evidence_summary**: Multiple analytical techniques provide supporting evidence - Abstract outlines overall findings, Results section presents CLSM imaging data, micro-CT mineral density measurements, nano-indentation hardness values, and SEM structural observations.
+
+19. **trace_status**: complete - All necessary source documentation is available and traceable.
+
+20. **trace_status_reason**: Sequence details, methodological approaches (CLSEM, micro-CT, SEM), functional claims, and supporting evidence all have explicit references within the paper structure.
+
+**FAE Records:**
+
+Multiple functional assessments documented through distinct experimental approaches:
+
+1. **adsorption evidence through CLSM**:
+   - function_label: adsorption
+   - evidence_level: in_vitro
+   - assay_category: adsorption_binding
+   - validation_method: CLSM
+   - readout_main: fluorescence localization
+   - result_text_summary: Fluorescence labeling demonstrates EBP accumulation within the superficial layer extending approximately 20 μm into the subsurface region, with signal intensity correlating to peptide concentration.
+   - text_to_evidence: Results > 3.1 CLSM findings
+   - trace_status: complete
+
+2. **remineralization assessment via micro-CT quantification**:
+   - function_label: remineralization
+   - evidence_level: in_vitro
+   - assay_category: remineralization_outcome
+   - validation_method: micro-CT
+   - readout_main: mineral density
+   - result_text_summary: EBP at 7.0 mM concentration yields a remineralization rate of 21.11%, substantially exceeding the control group's 10.41% (p = 0.008), indicating enhanced mineral content recovery.
+   - text_to_evidence: Results > 3.2 Micro-CT and remineralization rate; Table 1
+   - trace_status: complete
+
+3. **mechanical properties assessed through nanoindentation**:
+   - function_label: remineralization
+   - evidence_level: in_vitro
+   - assay_category: mechanical_property
+   - validation_method: nanoindentation
+   - readout_main: hardness
+   - result_text_summary: Surface hardness measurements show EBP-treated groups maintain significantly higher values than DW controls (p < 0.05), with the 7.0 mM condition producing maximum hardness improvements.
+   - text_to_evidence: Results > 3.2.1 Hardness changes; Table 2
+   - trace_status: complete
+
+4. **microstructural morphology examination via SEM**:
+   - function_label: other
+   - evidence_level: in_vitro
+   - assay_category: mineral_morphology
+   - validation_method: SEM
+   - readout_main: microstructure
+   - result_text_summary: At 7.0 mM concentration, interrod enamel structures become obscured and crystalline deposits accumulate in the outer layer, suggesting enhanced mineral integration.
+   - text_to_evidence: Results > SEM observation; Fig. 6 and Fig. 7
+   - trace_status: complete
+
+Need to verify the interaction_target classification carefully. The peptide interacts with demineralized enamel rather than pristine hydroxyapatite. While enamel contains HAp as its mineral phase, the substrate here is the demineralized organic matrix of enamel—not intact HAp crystals. This distinction matters for classification purposes.
+
+The key evidence appears in the Abstract, which explicitly states the peptide "binds to demineralized enamel and promotes remineralization," and in the CLSM results showing localization to demineralized regions. Since the target is the biological tissue structure rather than pure mineral crystals, "enamel" seems more appropriate than "HAp." The peptide's mechanism involves binding to demineralized tissue and then recruiting mineral ions to rebuild the subsurface lesion.
+
+The summary functions should focus on what was directly measured: the peptide's adsorption to the enamel surface and its subsequent effect on remineralization, which aligns with the original hypothesis being tested.
+
+For the interaction target, the primary biological substrate is demineralized enamel, though the mechanism ultimately involves hydroxyapatite formation. The paper's language and the experimental evidence both point to enamel as the direct interaction target rather than pure HAp crystals. The peptide's mechanism follows a pathway: EBP binds to demineralized enamel, then attracts calcium and phosphate ions from solution to form amorphous calcium phosphate, which subsequently crystallizes into hydroxyapatite within the subsurface lesion. The peptide's binding target is demineralized enamel tissue rather than pure hydroxyapatite, making "enamel" the appropriate classification since the substrate is the natural tooth structure containing HAp crystals, not isolated mineral. The interaction occurs with the biological tissue itself rather than synthetic HAp alone. The peptide sequence WGNYAYK originates from phage display screening, and the primary effects documented are adsorption and remineralization, with anti-demineralization not specifically tested in the experiments.
+
+Evidence comes from multiple analytical approaches: CLSM visualizes peptide binding and penetration into enamel, micro-CT quantifies mineral density recovery, nanoindentation measures hardness changes, and SEM reveals structural recovery patterns. These techniques document two key outcomes—peptide adsorption confirmed through fluorescence localization, and enhanced remineralization evidenced by increased mineral density and mechanical properties. The findings support the hypothesis that the peptide facilitates mineral redeposition in demineralized enamel lesions. 's a fifth FAE for SEM microstructure findings. I should also reconsider the assay_category for SEM—it could fit 'mineral_morphology' or 'other'. Let me finalize the structure with the correct number of FAEs and appropriate categorization for each technique.
+
+The curator_note should be null unless there's something noteworthy to add. For the CLSM findings specifically, I need to identify the key readout: fluorescence intensity serves as the main measurement, which directly reflects peptide binding and distribution patterns in the samples.
+</think>
+
+{"doi":"10.1016/j.heliyon.2023.e23176","pmid":null,"title":"Remineralization effects of enamel binding peptide, WGNYAYK, on enamel subsurface demineralization in vitro","journal_title":"Heliyon","publication_year":2024,"entity_name_raw":"enamel binding peptide (EBP)","entity_name_normalized":"WGNYAYK","sequence_raw":"WGNYAYK","interaction_target":"enamel","interaction_target_reason":"论文 Abstract 明确指出 'EBP binds to demineralized enamel and promotes remineralization'；Methods 使用 bovine lower incisor crowns（牛牙釉质）作为实验样本；Introduction 说明研究对象是 'early enamel caries' 的牙釉质脱矿损伤。肽段直接作用于脱矿釉质组织，而非纯 HAp 晶体粉末，因此 interaction_target 判定为 'enamel'（含 HAp 的生物矿化组织）","summary_functions":["adsorption","remineralization"],"summary_functions_reason":"摘要层明确提出两个核心结论：(1) 'EBP binds to demineralized enamel'——由 CLSM 实验直接验证荧光标记肽段在釉质表面及亚表面（约 20 μm）的富集定位；(2) 'promotes remineralization'——由 micro-CT 定量再矿化率和 nano-indentation 硬度测定验证。adsorption 和 remineralization 均有独立实验方法支持，anti_demineralization 未被直接测试，故仅保留此两个功能标签","evidence_overall_level":"in_vitro","evidence_overall_level_reason":"Methods Section 2.2 明确使用离体牛下切牙牙冠样本进行体外实验（'bovine incisors'、'in vitro' 模型），无动物体内实验或临床数据，全部实验在体外条件下完成","model_system_summary":"bovine enamel subsurface demineralization model","text_to_sequence":"Methods > 2.1 Peptide preparation","text_to_function_summary":"Abstract > Results/Conclusion","text_to_evidence_summary":"Abstract > Results/Conclusion; Results > 3.1 CLSM findings; Results > 3.2 Micro-CT and remineralization rate; Results > 3.2.1 Hardness changes; Results > SEM observation","trace_status":"complete","trace_status_reason":"所有核心溯源字段均有明确锚点：(1) sequence_raw 来源于 Methods Section 2.1 Peptide preparation；(2) CLSM、micro-CT、nano-indentation、 SEM 四种实验方法均有独立 Results 子章节定位；(3) 功能和证据来源均可追溯至 Abstract 和相应 Results 段落","curator_note":null,"fae_records":[{"function_label":"adsorption","evidence_level":"in_vitro","assay_category":"adsorption_binding","validation_method":"CLSM","readout_main":"fluorescence localization","result_text_summary":"CLSM 表面和纵切面图像显示 FITC 标记的 EBP 在牙釉质表面层及约 20 μm 亚表面区域有荧光富集，且荧光强度随 EBP 浓度（0.4 mM → 4.0 mM → 7.0 mM）升高而增加，表明 EBP 以浓度依赖性方式结合并渗透脱矿釉质","text_to_evidence":"Results > 3.1 CLSM findings; Fig. 2","trace_status":"complete"},{"function_label":"remineralization","evidence_level":"in_vitro","assay_category":"remineralization_outcome","validation_method":"micro-CT","readout_main":"mineral density","result_text_summary":"micro-CT 定量分析显示所有组再矿化后矿物密度均增加；7.0 mM EBP 组的再矿化率（%R = 21.11%）显著高于 DW 对照组（10.41%），差异有统计学意义（p = 0.008），表明 EBP 促进釉质亚表面矿物沉积","text_to_evidence":"Results > 3.2 Micro-CT and remineralization rate; Table 1","trace_status":"complete"},{"function_label":"remineralization","evidence_level":"in_vitro","assay_category":"mechanical_property","validation_method":"nanoindentation","readout_main":"hardness","result_text_summary":"纳米压痕测试显示所有 EBP 组的釉质表面硬度均显著高于 DW 对照组（p < 0.05），7.0 mM 组硬度最高，表明 EBP 促进的再矿化恢复了牙釉质的力学性能","text_to_evidence":"Results > 3.2.1 Hardness changes in remineralized enamel after EBP application; Table 2","trace_status":"complete"},{"function_label":"remineralization","evidence_level":"in_vitro","assay_category":"mineral_morphology","validation_method":"SEM","readout_main":"microstructure","result_text_summary":"SEM 表面图像显示 7.0 mM EBP 组釉质杆间结构模糊、晶体堆积；纵切面图像显示 7.0 mM 组晶体累积现象，提示 EBP 促进的再矿化改变了亚表面微观结构","text_to_evidence":"Results > SEM observation; Fig. 6 (surface); Fig. 7 (cross-section)","trace_status":"complete"}]}
+
+──────────────────────────────────────────────────────────────
+【parsed_output（解析后业务字段，完整）】
+──────────────────────────────────────────────────────────────
+{
+  "doi": "10.1016/j.heliyon.2023.e23176",
+  "pmid": null,
+  "title": "Remineralization effects of enamel binding peptide, WGNYAYK, on enamel subsurface demineralization in vitro",
+  "journal_title": "Heliyon",
+  "publication_year": 2024,
+  "entity_name_raw": "enamel binding peptide (EBP)",
+  "entity_name_normalized": "WGNYAYK",
+  "sequence_raw": "WGNYAYK",
+  "interaction_target": "enamel",
+  "summary_functions": [
+    "adsorption",
+    "remineralization"
+  ],
+  "evidence_overall_level": "in_vitro",
+  "model_system_summary": "bovine enamel subsurface demineralization model",
+  "text_to_sequence": "Methods > 2.1 Peptide preparation",
+  "text_to_function_summary": "Abstract > Results/Conclusion",
+  "text_to_evidence_summary": "Abstract > Results/Conclusion; Results > 3.1 CLSM findings; Results > 3.2 Micro-CT and remineralization rate; Results > 3.2.1 Hardness changes; Results > SEM observation",
+  "trace_status": "complete",
+  "curator_note": null,
+  "fae_records": [
+    {
+      "function_label": "adsorption",
+      "evidence_level": "in_vitro",
+      "assay_category": "adsorption_binding",
+      "validation_method": "CLSM",
+      "readout_main": "fluorescence localization",
+      "result_text_summary": "CLSM 表面和纵切面图像显示 FITC 标记的 EBP 在牙釉质表面层及约 20 μm 亚表面区域有荧光富集，且荧光强度随 EBP 浓度（0.4 mM → 4.0 mM → 7.0 mM）升高而增加，表明 EBP 以浓度依赖性方式结合并渗透脱矿釉质",
+      "text_to_evidence": "Results > 3.1 CLSM findings; Fig. 2",
+      "trace_status": "complete"
+    },
+    {
+      "function_label": "remineralization",
+      "evidence_level": "in_vitro",
+      "assay_category": "remineralization_outcome",
+      "validation_method": "micro-CT",
+      "readout_main": "mineral density",
+      "result_text_summary": "micro-CT 定量分析显示所有组再矿化后矿物密度均增加；7.0 mM EBP 组的再矿化率（%R = 21.11%）显著高于 DW 对照组（10.41%），差异有统计学意义（p = 0.008），表明 EBP 促进釉质亚表面矿物沉积",
+      "text_to_evidence": "Results > 3.2 Micro-CT and remineralization rate; Table 1",
+      "trace_status": "complete"
+    },
+    {
+      "function_label": "remineralization",
+      "evidence_level": "in_vitro",
+      "assay_category": "mechanical_property",
+      "validation_method": "nanoindentation",
+      "readout_main": "hardness",
+      "result_text_summary": "纳米压痕测试显示所有 EBP 组的釉质表面硬度均显著高于 DW 对照组（p < 0.05），7.0 mM 组硬度最高，表明 EBP 促进的再矿化恢复了牙釉质的力学性能",
+      "text_to_evidence": "Results > 3.2.1 Hardness changes in remineralized enamel after EBP application; Table 2",
+      "trace_status": "complete"
+    },
+    {
+      "function_label": "remineralization",
+      "evidence_level": "in_vitro",
+      "assay_category": "mineral_morphology",
+      "validation_method": "SEM",
+      "readout_main": "microstructure",
+      "result_text_summary": "SEM 表面图像显示 7.0 mM EBP 组釉质杆间结构模糊、晶体堆积；纵切面图像显示 7.0 mM 组晶体累积现象，提示 EBP 促进的再矿化改变了亚表面微观结构",
+      "text_to_evidence": "Results > SEM observation; Fig. 6 (surface); Fig. 7 (cross-section)",
+      "trace_status": "complete"
+    }
+  ]
+}
+
+──────────────────────────────────────────────────────────────
+【llm_reasoning（判断依据，完整）】
+──────────────────────────────────────────────────────────────
+{
+  "interaction_target_reason": "论文 Abstract 明确指出 'EBP binds to demineralized enamel and promotes remineralization'；Methods 使用 bovine lower incisor crowns（牛牙釉质）作为实验样本；Introduction 说明研究对象是 'early enamel caries' 的牙釉质脱矿损伤。肽段直接作用于脱矿釉质组织，而非纯 HAp 晶体粉末，因此 interaction_target 判定为 'enamel'（含 HAp 的生物矿化组织）",
+  "summary_functions_reason": "摘要层明确提出两个核心结论：(1) 'EBP binds to demineralized enamel'——由 CLSM 实验直接验证荧光标记肽段在釉质表面及亚表面（约 20 μm）的富集定位；(2) 'promotes remineralization'——由 micro-CT 定量再矿化率和 nano-indentation 硬度测定验证。adsorption 和 remineralization 均有独立实验方法支持，anti_demineralization 未被直接测试，故仅保留此两个功能标签",
+  "evidence_overall_level_reason": "Methods Section 2.2 明确使用离体牛下切牙牙冠样本进行体外实验（'bovine incisors'、'in vitro' 模型），无动物体内实验或临床数据，全部实验在体外条件下完成",
+  "trace_status_reason": "所有核心溯源字段均有明确锚点：(1) sequence_raw 来源于 Methods Section 2.1 Peptide preparation；(2) CLSM、micro-CT、nano-indentation、 SEM 四种实验方法均有独立 Results 子章节定位；(3) 功能和证据来源均可追溯至 Abstract 和相应 Results 段落"
+}
+
+══════════════════════════════════════════════════════════════

@@ -1,0 +1,117 @@
+══════════════════════════════════════════════════════════════
+PepClaw v0.1 抽取报告
+生成时间：2026-04-05 19:57:43 UTC
+来源 PDF：v0.1_article_test.pdf
+paper_id：P000001
+record_id：P000001-R01
+run_id：run_20260405_195654_77f8e6
+══════════════════════════════════════════════════════════════
+
+【论文信息】
+  标题：Remineralization effects of enamel binding peptide, WGNYAYK, on enamel subsurface demineralization in vitro
+  DOI：10.1016/j.heliyon.2023.e23176
+  PMID：—
+  期刊：Heliyon
+  发表年份：2024
+
+【肽段信息】
+  原文名称：enamel binding peptide (EBP)
+  标准名称：WGNYAYK
+  氨基酸序列：WGNYAYK
+  作用对象：enamel
+  主要功能：adsorption; remineralization
+  总体证据层级：in_vitro
+  实验体系：bovine enamel subsurface demineralization model
+
+【溯源信息】
+  溯源状态：complete
+  序列来源：Methods > 2.1 Peptide preparation
+  功能来源：Abstract > Results/Conclusion
+  证据来源：Abstract > Results/Conclusion; Results > 3.1 CLSM findings; Results > 3.2 Micro-CT and remineralization rate; Results > 3.2.1 Hardness changes; Results > SEM observation
+
+【功能证据记录（FAE，共 4 条）】
+
+  ────────────────────────────────────────
+  FAE ID：P000001-R01-FAE01
+  功能标签：adsorption
+  实验类别：adsorption_binding
+  实验方法：CLSM
+  测量指标：fluorescence localization
+  证据层级：in_vitro
+  结果摘要：CLSM 表面和纵切面图像显示 FITC 标记的 EBP 在牙釉质表面层及约 20 μm 亚表面区域有荧光富集，且荧光强度随 EBP 浓度（0.4 mM → 4.0 mM → 7.0 mM）升高而增加，表明 EBP 以浓度依赖性方式结合并渗透脱矿釉质
+  证据来源：Results > 3.1 CLSM findings; Fig. 2
+  溯源状态：complete
+
+  ────────────────────────────────────────
+  FAE ID：P000001-R01-FAE02
+  功能标签：remineralization
+  实验类别：remineralization_outcome
+  实验方法：micro-CT
+  测量指标：mineral density
+  证据层级：in_vitro
+  结果摘要：micro-CT 定量分析显示所有组再矿化后矿物密度均增加；7.0 mM EBP 组的再矿化率（%R = 21.11%）显著高于 DW 对照组（10.41%），差异有统计学意义（p = 0.008），表明 EBP 促进釉质亚表面矿物沉积
+  证据来源：Results > 3.2 Micro-CT and remineralization rate; Table 1
+  溯源状态：complete
+
+  ────────────────────────────────────────
+  FAE ID：P000001-R01-FAE03
+  功能标签：remineralization
+  实验类别：mechanical_property
+  实验方法：nanoindentation
+  测量指标：hardness
+  证据层级：in_vitro
+  结果摘要：纳米压痕测试显示所有 EBP 组的釉质表面硬度均显著高于 DW 对照组（p < 0.05），7.0 mM 组硬度最高，表明 EBP 促进的再矿化恢复了牙釉质的力学性能
+  证据来源：Results > 3.2.1 Hardness changes in remineralized enamel after EBP application; Table 2
+  溯源状态：complete
+
+  ────────────────────────────────────────
+  FAE ID：P000001-R01-FAE04
+  功能标签：remineralization
+  实验类别：mineral_morphology
+  实验方法：SEM
+  测量指标：microstructure
+  证据层级：in_vitro
+  结果摘要：SEM 表面图像显示 7.0 mM EBP 组釉质杆间结构模糊、晶体堆积；纵切面图像显示 7.0 mM 组晶体累积现象，提示 EBP 促进的再矿化改变了亚表面微观结构
+  证据来源：Results > SEM observation; Fig. 6 (surface); Fig. 7 (cross-section)
+  溯源状态：complete
+
+══════════════════════════════════════════════════════════════
+【Trace — 任务执行摘要（extraction_runs）】
+  run_id：run_20260405_195654_77f8e6
+  运行状态：success
+  模型：MiniMax-M2.7-highspeed
+  Prompt 版本：v0.1.0  |  字段字典版本：v0.1
+  开始时间：2026-04-05T19:56:54.622559+00:00
+  结束时间：2026-04-05T19:57:43.044468+00:00
+  总耗时：48.4 秒
+  Token 消耗：输入 14410 + 输出 2828 = 合计 17238
+  抽取记录数：4  |  写入记录数：4
+  完整性检查：passed
+
+【Trace — LLM 调用详情（trace_steps / step 1）】
+  step_id：run_20260405_195654_77f8e6_step_01
+  调用类型：extraction
+  调用模型：MiniMax-M2.7-highspeed
+  HTTP 状态码：200
+  步骤状态：success
+  调用时间：2026-04-05T19:56:54.967230+00:00
+  响应时间：2026-04-05T19:57:43.030260+00:00
+  LLM 响应耗时：48.06 秒（48063 ms）
+  输入 token：14410
+  输出 token：2828
+
+  【LLM 判断依据（llm_reasoning）】
+  [interaction_target 判断依据]
+  论文 Abstract 明确指出 'EBP binds to demineralized enamel and promotes remineralization'；Methods 使用 bovine lower incisor crowns（牛牙釉质）作为实验样本；Introduction 说明研究对象是 'early enamel caries' 的牙釉质脱矿损伤。肽段直接作用于脱矿釉质组织，而非纯 HAp 晶体粉末，因此 interaction_target 判定为 'enamel'（含 HAp 的生物矿化组织）
+
+  [summary_functions 判断依据]
+  摘要层明确提出两个核心结论：(1) 'EBP binds to demineralized enamel'——由 CLSM 实验直接验证荧光标记肽段在釉质表面及亚表面（约 20 μm）的富集定位；(2) 'promotes remineralization'——由 micro-CT 定量再矿化率和 nano-indentation 硬度测定验证。adsorption 和 remineralization 均有独立实验方法支持，anti_demineralization 未被直接测试，故仅保留此两个功能标签
+
+  [evidence_overall_level 判断依据]
+  Methods Section 2.2 明确使用离体牛下切牙牙冠样本进行体外实验（'bovine incisors'、'in vitro' 模型），无动物体内实验或临床数据，全部实验在体外条件下完成
+
+  [trace_status 判断依据]
+  所有核心溯源字段均有明确锚点：(1) sequence_raw 来源于 Methods Section 2.1 Peptide preparation；(2) CLSM、micro-CT、nano-indentation、 SEM 四种实验方法均有独立 Results 子章节定位；(3) 功能和证据来源均可追溯至 Abstract 和相应 Results 段落
+
+
+══════════════════════════════════════════════════════════════
