@@ -1,0 +1,117 @@
+══════════════════════════════════════════════════════════════
+PepClaw v0.1 抽取报告
+生成时间：2026-04-06 21:27:53 UTC
+来源 PDF：v0.1_article_test.pdf
+paper_id：P000001
+record_id：P000001-R01
+run_id：run_20260406_212731_5c0f3c
+══════════════════════════════════════════════════════════════
+
+【论文信息】
+  标题：Remineralization effects of enamel binding peptide, WGNYAYK, on enamel subsurface demineralization in vitro
+  DOI：10.1016/j.heliyon.2023.e23176
+  PMID：—
+  期刊：Heliyon
+  发表年份：2024
+
+【肽段信息】
+  原文名称：enamel binding peptide (EBP)
+  标准名称：WGNYAYK
+  氨基酸序列：WGNYAYK
+  作用对象：enamel
+  主要功能：adsorption; remineralization
+  总体证据层级：in_vitro
+  实验体系：bovine lower incisor crown enamel subsurface demineralization model
+
+【溯源信息】
+  溯源状态：complete
+  序列来源：Methods > 2.1 Peptide preparation
+  功能来源：Abstract > Results/Conclusion
+  证据来源：Abstract > Results/Conclusion; Results > 3.1 CLSM; Results > 3.2 Micro-CT and remineralization rate; Results > 3.2.1 Hardness changes; Results > SEM observation
+
+【功能证据记录（FAE，共 4 条）】
+
+  ────────────────────────────────────────
+  FAE ID：P000001-R01-FAE01
+  功能标签：adsorption
+  实验类别：adsorption_binding
+  实验方法：CLSM
+  测量指标：fluorescence localization
+  证据层级：in_vitro
+  结果摘要：FITC 标记的 EBP 在 CLSM 下于牙釉质表面和表面下约 20 μm 处显示浓度依赖性的荧光富集，表明 EBP 能够结合并渗透脱矿牙釉质
+  证据来源：Results > 3.1 CLSM
+  溯源状态：complete
+
+  ────────────────────────────────────────
+  FAE ID：P000001-R01-FAE02
+  功能标签：remineralization
+  实验类别：remineralization_outcome
+  实验方法：micro-CT
+  测量指标：mineral density and remineralization rate (%R)
+  证据层级：in_vitro
+  结果摘要：micro-CT 定量分析显示 EBP 7.0 mM 组的再矿化率（21.11%）显著高于 DW 组（10.41%，p=0.008），矿物密度在再矿化后增加
+  证据来源：Results > 3.2 Micro-CT and remineralization rate
+  溯源状态：complete
+
+  ────────────────────────────────────────
+  FAE ID：P000001-R01-FAE03
+  功能标签：remineralization
+  实验类别：remineralization_outcome
+  实验方法：nanoindentation
+  测量指标：surface hardness
+  证据层级：in_vitro
+  结果摘要：纳米压痕测试显示所有 EBP 组的牙釉质表面硬度均显著高于 DW 组（p<0.05），7.0 mM 组硬度最高，表明 EBP 促进再矿化恢复了牙釉质力学性能
+  证据来源：Results > 3.2.1 Hardness changes in remineralized enamel after EBP application
+  溯源状态：complete
+
+  ────────────────────────────────────────
+  FAE ID：P000001-R01-FAE04
+  功能标签：remineralization
+  实验类别：mineral_morphology
+  实验方法：SEM
+  测量指标：surface and cross-sectional microstructure
+  证据层级：in_vitro
+  结果摘要：SEM 显示 7.0 mM EBP 组表面釉柱间结构模糊，提示表面晶体结构恢复；纵切面可见表面区域晶体堆积，表明矿化微结构改变
+  证据来源：Results > SEM observation
+  溯源状态：complete
+
+══════════════════════════════════════════════════════════════
+【Trace — 任务执行摘要（extraction_runs）】
+  run_id：run_20260406_212731_5c0f3c
+  运行状态：success
+  模型：MiniMax-M2.7-highspeed
+  Prompt 版本：v0.1.0  |  字段字典版本：v0.1
+  开始时间：2026-04-06T21:27:31.107684+00:00
+  结束时间：2026-04-06T21:27:53.540465+00:00
+  总耗时：22.4 秒
+  Token 消耗：输入 14410 + 输出 1454 = 合计 15864
+  抽取记录数：4  |  写入记录数：4
+  完整性检查：passed
+
+【Trace — LLM 调用详情（trace_steps / step 1）】
+  step_id：run_20260406_212731_5c0f3c_step_01
+  调用类型：extraction
+  调用模型：MiniMax-M2.7-highspeed
+  HTTP 状态码：200
+  步骤状态：success
+  调用时间：2026-04-06T21:27:31.446577+00:00
+  响应时间：2026-04-06T21:27:53.527133+00:00
+  LLM 响应耗时：22.08 秒（22080 ms）
+  输入 token：14410
+  输出 token：1454
+
+  【LLM 判断依据（llm_reasoning）】
+  [interaction_target 判断依据]
+  论文使用牛牙冠切牙构建牙釉质表层下脱矿模型（Methods 2.2–2.3），CLSM 观察到 FITC 标记的 EBP 结合于脱矿牙釉质表面并渗透至表面下约 20 μm（Results 3.1），确认 EBP 的主要作用对象为牙釉质而非纯 HAp 晶体
+
+  [summary_functions 判断依据]
+  吸附功能由 CLSM 实验直接支持（FITC-EBP 在牙釉质表面及内部出现荧光富集，Results 3.1）；再矿化功能由 micro-CT 定量结果支持（EBP 7.0 mM 组的再矿化率显著高于 DW 组，p=0.008，Results 3.2），两类功能均有独立实验证据
+
+  [evidence_overall_level 判断依据]
+  全文实验均使用牛牙釉质离体样本进行体外研究，包括 CLSM、micro-CT、纳米压痕和 SEM，无动物实验或临床数据
+
+  [trace_status 判断依据]
+  sequence、function 和 evidence 三类来源字段均可在论文中找到明确锚点：序列来源于 Methods 2.1，功能来源于摘要和结论部分，证据分布于 CLSM（Results 3.1）、micro-CT（Results 3.2）、纳米压痕（Results 3.2.1）和 SEM（Results > SEM observation）
+
+
+══════════════════════════════════════════════════════════════
