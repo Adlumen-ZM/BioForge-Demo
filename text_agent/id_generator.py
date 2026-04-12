@@ -2,7 +2,7 @@ import sqlite3
 import os
 
 # 业务数据库路径，优先读取环境变量，默认写入 data/ 目录
-BIZ_DB_PATH = os.getenv('BIZ_DB_PATH', 'data/hap_v01.db')
+BIZ_DB_PATH = os.getenv('BIZ_DB_PATH', 'db/data/hap_v01.db')
 
 
 def generate_paper_id() -> str:
