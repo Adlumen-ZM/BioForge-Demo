@@ -261,7 +261,10 @@ _ENTITY_SYSTEM_PROMPT = f"""\
       → assay_category = "surface_localization"
       → validation_method = "CLSM" 或 "fluorescence_microscopy"
       → 对应 function_label = "localization"（binding 层）
-  - 微硬度测试（Vickers hardness / VHN）/ 纳米压痕（nanoindentation）/ 弹性模量
+  - 微硬度测试（Vickers hardness / VHN）/ 弹性模量
+      → assay_category = "mechanical_property"
+      → validation_method = "other"（Vickers 硬度非纳米压痕，填 other）
+  - 纳米压痕（nanoindentation）
       → assay_category = "mechanical_property"
       → validation_method = "nanoindentation"
   - Raman 光谱 / 拉曼光谱 分析矿物含量或矿化率
@@ -364,8 +367,9 @@ def _parse_and_validate(raw: str, schema: Dict, label: str) -> Dict[str, Any]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
+        # [E7] 截断 raw，避免将大段 LLM 响应（含版权文本）写入日志
         raise ExtractionFormatError(
-            f"JSON 解析失败（{label}）: {e}\n原始响应: {raw!r}"
+            f"JSON 解析失败（{label}）: {e}\n原始响应（前500字符）: {raw[:500]!r}"
         ) from e
     try:
         jsonschema.validate(instance=data, schema=schema)
@@ -396,8 +400,12 @@ class PaperExtractor:
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> None:
-        self.model  = model
-        self.client = _make_client(api_key, base_url)
+        self.model     = model
+        self.client    = _make_client(api_key, base_url)
+        self._last_raw = ""   # trace 用：保存最后一次 LLM 原始输出
+
+    # [E1] 上下文长度上限：防止超过模型窗口导致静默截断
+    _MAX_CONTEXT_CHARS = 30_000
 
     def extract(self, context: str) -> Dict[str, Any]:
         """
@@ -414,6 +422,12 @@ class PaperExtractor:
             logger.warning("paper meta context 为空，返回默认占位值")
             return _default_paper_meta()
 
+        # [E1] 超长上下文截断
+        if len(context) > self._MAX_CONTEXT_CHARS:
+            logger.warning("[PaperExtractor] context 过长（%d chars），截断至 %d",
+                           len(context), self._MAX_CONTEXT_CHARS)
+            context = context[:self._MAX_CONTEXT_CHARS]
+
         user_prompt = _PAPER_USER_TEMPLATE.format(context=context)
         logger.info("[PaperExtractor] 调用 LLM，模型=%s", self.model)
         response = self.client.chat.completions.create(
@@ -426,6 +440,7 @@ class PaperExtractor:
             temperature=0.0,
         )
         raw = response.choices[0].message.content
+        self._last_raw = raw[:2000]
         logger.info("[PaperExtractor] Raw: %s", raw[:400])
         return _parse_and_validate(raw, PAPER_SCHEMA, "paper_meta")
 
@@ -450,8 +465,9 @@ class EntityExtractor:
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> None:
-        self.model  = model
-        self.client = _make_client(api_key, base_url)
+        self.model     = model
+        self.client    = _make_client(api_key, base_url)
+        self._last_raw = ""   # trace 用：保存最后一次 LLM 原始输出
 
     def extract(self, target_entity: str, context: str) -> Dict[str, Any]:
         """
@@ -469,6 +485,13 @@ class EntityExtractor:
             logger.info("[EntityExtractor] context 为空，返回 not_found 占位（目标: %s）", target_entity)
             return _default_entity(target_entity)
 
+        # [E1] 超长上下文截断
+        _MAX_CONTEXT_CHARS = 30_000
+        if len(context) > _MAX_CONTEXT_CHARS:
+            logger.warning("[EntityExtractor] context 过长（%d chars），截断至 %d（目标: %s）",
+                           len(context), _MAX_CONTEXT_CHARS, target_entity)
+            context = context[:_MAX_CONTEXT_CHARS]
+
         user_prompt = _ENTITY_USER_TEMPLATE.format(
             target_entity=target_entity,
             context=context,
@@ -485,6 +508,7 @@ class EntityExtractor:
             temperature=0.0,
         )
         raw = response.choices[0].message.content
+        self._last_raw = raw[:2000]
         logger.info("[EntityExtractor] Raw (target=%s): %s", target_entity, raw[:600])
         return _parse_and_validate(raw, ENTITY_SCHEMA, f"entity:{target_entity}")
 
@@ -500,7 +524,8 @@ def _default_paper_meta() -> Dict[str, Any]:
         "publication_year": None, "abstract": None, "keywords": None,
         "full_text_availability": "unknown",
         "retrieval_source": "manual_entry",
-        "curator_note": "context 为空，未能提取元数据",
+        # [E2] 使用英文短标记，避免中文诊断文本污染下游数据分析
+        "curator_note": "EXTRACTION_SKIPPED:empty_context",
     }
 
 
@@ -522,7 +547,8 @@ def _default_entity(name: str) -> Dict[str, Any]:
         "model_system_summary":   None,
         "text_to_sequence":       None,
         "trace_status":           "missing",
-        "curator_note":           "context 为空，未能提取实体信息",
+        # [E2] 使用英文短标记
+        "curator_note":           "EXTRACTION_SKIPPED:empty_context",
         "functions":              [],
     }
 

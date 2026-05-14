@@ -90,6 +90,23 @@ EVIDENCE_FIELDS = [
     "trace_status", "curator_note",
 ]
 
+TRACE_FIELDS = [
+    "trace_id",        # 唯一标识，格式：{paper_id}-{stage}-{seq}
+    "paper_id",        # 所属论文 ID
+    "source_pdf",      # 源 PDF 文件名
+    "stage",           # scout_entity | scout_paper_meta | strike
+    "entity_name",     # 当前处理的实体名（paper 级阶段为空）
+    "queries_used",    # JSON list：本阶段使用的检索 query
+    "chunks_hit_ids",  # JSON list：命中的 chunk_id
+    "context_chars",   # 发送给 LLM 的 context 字符数
+    "llm_model",       # 使用的 LLM 模型名称
+    "llm_raw_output",  # LLM 原始输出（前 2000 字符）
+    "entities_found",  # scout_entity 阶段发现的实体列表（JSON）
+    "status",          # success | error | skipped
+    "error_msg",       # 错误信息（status=error 时填写）
+    "created_at",      # ISO 8601 UTC 时间戳
+]
+
 # ── paper_id 计数器（持久化，跨运行连续编号）────────────────────────────
 
 def _get_counter_file(out_dir: Path) -> Path:
@@ -101,8 +118,9 @@ def _load_counter(out_dir: Path) -> int:
     if counter_file.exists():
         try:
             return int(json.loads(counter_file.read_text(encoding="utf-8"))["next"])
-        except Exception:
-            pass
+        except (KeyError, ValueError, json.JSONDecodeError) as e:
+            # [P3] 明确捕获并记录具体错误，避免吞掉异常后 ID 冲突
+            logger.warning("paper_id_counter.json 读取失败（%s），从 1 重新开始", e)
     return 1
 
 
@@ -133,7 +151,11 @@ def build_components():
     ragflow_key  = _require_env("RAGFLOW_API_KEY")
     llm_key      = _require_env("LLM_API_KEY")
     llm_base     = os.environ.get("LLM_BASE_URL") or None
-    llm_model    = os.environ.get("LLM_MODEL", "gpt-4o")
+    # [P4] 默认值不与 LLM_BASE_URL 联动会导致端点不匹配，强制要求显式配置
+    llm_model = os.environ.get("LLM_MODEL", "").strip()
+    if not llm_model:
+        logger.warning("LLM_MODEL 未配置，使用默认值 'ark-code-latest'；如需更改请在 .env 中设置")
+        llm_model = "ark-code-latest"
 
     parser = RAGFlowParser(api_key=ragflow_key, base_url=ragflow_base)
 
@@ -289,6 +311,7 @@ def run(pdf_dir: str, out_dir: str) -> None:
     record_csv   = out_path / "paper_entity_record.csv"
     function_csv = out_path / "record_function.csv"
     evidence_csv = out_path / "function_assay_evidence.csv"
+    trace_csv    = out_path / "pipeline_trace.csv"
 
     # 追加模式（a），文件不存在时自动创建并写表头
     def _open_csv(path: Path, fields: list):
@@ -303,21 +326,27 @@ def run(pdf_dir: str, out_dir: str) -> None:
     fh_record,   w_record   = _open_csv(record_csv,   RECORD_FIELDS)
     fh_function, w_function = _open_csv(function_csv, FUNCTION_FIELDS)
     fh_evidence, w_evidence = _open_csv(evidence_csv, EVIDENCE_FIELDS)
+    fh_trace,    w_trace    = _open_csv(trace_csv,    TRACE_FIELDS)
 
     try:
         for pdf_path in pdf_files:
             try:
                 logger.info(">>> 处理: %s", pdf_path.name)
                 chunks = parser.parse(str(pdf_path))
+                # [P2] 空 chunk 守卫：避免传入 orchestrator 后触发 O2 除零崩溃
+                if not chunks:
+                    logger.warning("[%s] 解析返回 0 个 chunk，跳过", pdf_path.name)
+                    continue
                 logger.info("[%s] 解析完成，chunk=%d（table=%d，text=%d）",
                             pdf_path.name, len(chunks),
                             sum(1 for c in chunks if c.get("type") == "table"),
                             sum(1 for c in chunks if c.get("type") == "text"))
 
-                result = orchestrator.process_pdf(str(pdf_path), chunks)
-
                 paper_id = _make_paper_id(counter)
                 counter += 1
+
+                result = orchestrator.process_pdf(str(pdf_path), chunks,
+                                                  paper_id=paper_id)
 
                 p_rows, r_rows, fn_rows, ev_rows = _flatten_result(
                     str(pdf_path), result, paper_id
@@ -328,8 +357,15 @@ def run(pdf_dir: str, out_dir: str) -> None:
                 w_function.writerows(fn_rows)
                 w_evidence.writerows(ev_rows)
 
+                # 写入 trace 记录
+                for seq, rec in enumerate(orchestrator.trace_records, start=1):
+                    trace_row = {f: "" for f in TRACE_FIELDS}
+                    trace_row.update(rec)
+                    trace_row["trace_id"] = f"{paper_id}-{rec.get('stage','')}-{seq:02d}"
+                    w_trace.writerow(trace_row)
+
                 # 立即刷盘，防止中途崩溃丢失数据
-                for fh in (fh_paper, fh_record, fh_function, fh_evidence):
+                for fh in (fh_paper, fh_record, fh_function, fh_evidence, fh_trace):
                     fh.flush()
 
                 logger.info(
@@ -343,14 +379,15 @@ def run(pdf_dir: str, out_dir: str) -> None:
 
     finally:
         _save_counter(out_path, counter)
-        for fh in (fh_paper, fh_record, fh_function, fh_evidence):
+        for fh in (fh_paper, fh_record, fh_function, fh_evidence, fh_trace):
             fh.close()
 
     logger.info("完成！输出目录: %s", out_dir)
-    logger.info("  paper.csv               : %s", paper_csv)
-    logger.info("  paper_entity_record.csv : %s", record_csv)
-    logger.info("  record_function.csv     : %s", function_csv)
+    logger.info("  paper.csv                  : %s", paper_csv)
+    logger.info("  paper_entity_record.csv    : %s", record_csv)
+    logger.info("  record_function.csv        : %s", function_csv)
     logger.info("  function_assay_evidence.csv: %s", evidence_csv)
+    logger.info("  pipeline_trace.csv         : %s", trace_csv)
 
 
 if __name__ == "__main__":

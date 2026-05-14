@@ -65,7 +65,9 @@ class BGEHybridRetriever:
             [{"chunk_id": "doc_p1_b0_table", "text": "..."}, ...]
         """
         if not chunks:
-            raise ValueError("chunks 列表为空，无法建立索引")
+            # [R3] 改为 warning + 提前返回，避免与 O2 联动形成崩溃链
+            logger.warning("build_index() 收到空 chunk 列表，跳过建库")
+            return
 
         texts = [c["text"] for c in chunks]
         logger.info("编码 %d 个 chunk ...", len(texts))
@@ -95,7 +97,7 @@ class BGEHybridRetriever:
     def retrieve(
         self,
         query: str,
-        threshold: float = 0.1,
+        threshold: float = 0.1,   # 实验使用值；技术方案中同步记录为 0.1
         top_k: int = 8,
     ) -> str:
         """
@@ -117,9 +119,10 @@ class BGEHybridRetriever:
 
         # Dense 路：余弦相似度（点积，因为已归一化）
         q_dense = np.array(q_output["dense_vecs"][0], dtype=np.float32)
+        # [R2] 与 build_index 保持一致的归一化兜底写法
         q_norm = np.linalg.norm(q_dense)
-        if q_norm > 0:
-            q_dense /= q_norm
+        q_norm = q_norm if q_norm > 0 else 1.0
+        q_dense /= q_norm
         dense_scores = self._dense_matrix @ q_dense  # shape: (N,)
 
         # Sparse 路：词法权重稀疏点积

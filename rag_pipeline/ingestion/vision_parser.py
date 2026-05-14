@@ -22,12 +22,17 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
+import socket
 import time
 from pathlib import Path
 from typing import Any, Dict, List
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 # ── 摘要段落启发式关键词（匹配生物医学文献首页摘要）────────────────────
 _ABSTRACT_SIGNALS = ("abstract", "summary", "摘要", "overview", "synopsis")
@@ -120,28 +125,28 @@ class RAGFlowParser:
         try:
             # ── [1/4] 新建临时 dataset ────────────────────────────────
             dataset_id = self._create_dataset(pdf_path.name, chunk_method)
-            print(f"[1/4] Dataset 创建成功: {dataset_id}")
+            logger.info("[1/4] Dataset 创建成功: %s", dataset_id)
 
             # ── [2/4] 上传 PDF ────────────────────────────────────────
             doc_id = self._upload(pdf_path, dataset_id)
-            print(f"[2/4] 上传成功: {doc_id}")
+            logger.info("[2/4] 上传成功: %s", doc_id)
 
             # ── [3/4] 触发解析 + 轮询 ────────────────────────────────
             self._trigger_parse(dataset_id, doc_id)
-            print("[3/4] 已触发解析，等待完成...")
+            logger.info("[3/4] 已触发解析，等待完成...")
             self._poll_until_done(dataset_id, doc_id)
 
             # ── [4/4] 拉取切片并映射 ──────────────────────────────────
             chunks = self._fetch_and_map_chunks(dataset_id, doc_id, pdf_path.name)
-            print(f"[4/4] 解析完成，共 {len(chunks)} 个 chunk"
-                  f"（表格块: {sum(1 for c in chunks if c['type'] == 'table')}）")
+            logger.info("[4/4] 解析完成，共 %d 个 chunk（表格块: %d）",
+                        len(chunks), sum(1 for c in chunks if c['type'] == 'table'))
             return chunks
 
         finally:
             # ── 无论成功/失败，必须销毁临时 dataset ──────────────────
             if dataset_id:
                 self._delete_dataset(dataset_id)
-                print("临时 dataset 已清理")
+                logger.info("临时 dataset 已清理")
 
     # ──────────────────────────────────────────────────────────────────
     # [1/4] 新建临时 dataset
@@ -170,7 +175,7 @@ class RAGFlowParser:
         last_exc: Exception | None = None
         for attempt in range(1, max_retries + 1):
             try:
-                print(f"      [上传] 第 {attempt}/{max_retries} 次尝试...")
+                logger.info("[上传] 第 %d/%d 次尝试...", attempt, max_retries)
                 with open(pdf_path, "rb") as f:
                     resp = self._session.post(
                         url,
@@ -180,10 +185,11 @@ class RAGFlowParser:
                 resp.raise_for_status()
                 body = _check_code(resp, step="upload")
                 return body["data"][0]["id"]
-            except Exception as exc:
+            # [V1] 仅捕获网络相关异常，避免 MemoryError 等非网络问题被掩盖
+            except (requests.RequestException, ConnectionError, TimeoutError, OSError) as exc:
                 last_exc = exc
                 if attempt < max_retries:
-                    print(f"      [上传] 失败（{exc}），5s 后重试...")
+                    logger.warning("[上传] 失败（%s），5s 后重试...", exc)
                     time.sleep(5)
         raise last_exc  # type: ignore[misc]
 
@@ -225,7 +231,7 @@ class RAGFlowParser:
                 doc      = docs[0]
                 run      = doc.get("run")
                 progress = doc.get("progress", "?")
-                print(f"      run={run!r}  progress={progress}")
+                logger.info("[轮询] run=%r  progress=%s", run, progress)
 
                 if _is_done(run):
                     return
@@ -237,7 +243,13 @@ class RAGFlowParser:
             except RuntimeError:
                 raise
             except requests.RequestException as e:
-                print(f"      [轮询] 网络异常: {e}，{self.POLL_INTERVAL_SEC}s 后重试...")
+                # [V3] DNS 永久失败立即终止，不浪费 10 分钟重试
+                cause = e.__context__ or e.__cause__
+                if isinstance(cause, socket.gaierror):
+                    raise RuntimeError(
+                        f"DNS 解析失败，无法访问 RAGFlow 服务，请检查网络: {e}"
+                    ) from e
+                logger.warning("[轮询] 网络异常: %s，%ds 后重试...", e, self.POLL_INTERVAL_SEC)
 
             time.sleep(self.POLL_INTERVAL_SEC)
             elapsed += self.POLL_INTERVAL_SEC
@@ -292,8 +304,8 @@ class RAGFlowParser:
                 timeout=60,
             )
         except Exception:
-            # 清理失败只警告，不抛异常（主流程已完成）
-            print(f"      [警告] 临时 dataset {dataset_id} 清理失败，请手动删除")
+            # [V4] 清理失败记录到 logger，便于后续手动清理
+            logger.warning("临时 dataset %s 清理失败，请手动删除", dataset_id, exc_info=True)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -304,7 +316,8 @@ def _check_code(resp: requests.Response, step: str) -> Dict:
     """统一校验 RAGFlow 业务码，非 0 立即抛出 RuntimeError。"""
     try:
         body = resp.json()
-    except ValueError as exc:
+    except json.JSONDecodeError as exc:
+        # [V5] 明确捕获 JSONDecodeError，避免其他 ValueError 被误报为"响应非 JSON"
         raise RuntimeError(
             f"[{step}] 响应非 JSON (HTTP {resp.status_code}): {resp.text[:200]}"
         ) from exc
