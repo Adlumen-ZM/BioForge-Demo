@@ -1,0 +1,26 @@
+# TODO: 根据数据库选型完善
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bioforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bioforge}
+      POSTGRES_DB: ${POSTGRES_DB:-bioforge}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+
+  backend:
+    build: .
+    env_file: .env
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

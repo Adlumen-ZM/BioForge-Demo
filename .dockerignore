@@ -1,0 +1,11 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+data/
+*.db
+.git/
+.idea/
+docs/
+tests_io/
