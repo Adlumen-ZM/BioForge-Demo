@@ -1,0 +1,9 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# E/W: 基础风格  F: 常见错误  I: import排序  B: 潜在bug
+select = ["E", "W", "F", "I", "B"]
+
+# 忽略行长度限制（已用line-length控制）
+ignore = ["E501"]

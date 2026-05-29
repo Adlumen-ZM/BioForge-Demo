@@ -1,0 +1,5 @@
+runner:
+  ruff:
+    cmd: ruff check . --exit-zero --output-format=rdjson
+    format: rdjson
+    level: warning

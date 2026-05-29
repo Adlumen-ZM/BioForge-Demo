@@ -1,0 +1,78 @@
+name: reviewdog
+
+on:
+  pull_request:
+
+jobs:
+  reviewdog:
+    name: reviewdog
+    runs-on: ubuntu-latest
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Set up reviewdog
+        uses: reviewdog/action-setup@v1.5.0
+        with:
+          reviewdog_version: v0.21.0
+
+      # 这一步只用来判断“是否有问题”
+      - name: Check Ruff status
+        id: ruff_check
+        run: |
+          if ruff check .; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 这一步继续把结果交给 reviewdog 发到 PR
+      # 用 --exit-zero 是为了让 reviewdog 这一步稳定执行，不被 Ruff 退出码中断
+      - name: Run reviewdog with Ruff
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          reviewdog \
+            -conf=.reviewdog.yml \
+            -runners=ruff \
+            -reporter=github-pr-review \
+            -filter-mode=nofilter
+
+      # 只有真正“无问题”才发 happy comment
+      - name: Post happy comment when Ruff is clean
+        if: steps.ruff_check.outputs.clean == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const body = "ReviewDog: wangwang! He's happy. No problem.";
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body
+            });

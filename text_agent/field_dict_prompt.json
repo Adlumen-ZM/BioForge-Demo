@@ -1,0 +1,216 @@
+{
+  "_meta": {
+    "version": "v0.1",
+    "description": "Text Agent System Prompt 使用的字段字典。仅包含 v0.1 数据库对应的字段，不含系统自动填充字段（paper_id / record_id / fae_id / extraction_run_id / created_at）。",
+    "note": "reasoning 字段（*_reason）由 LLM 在输出 JSON 中额外提供，由 response_parser.py 提取后存入 trace_steps.llm_reasoning，不写入业务表。"
+  },
+
+  "paper_level_fields": {
+    "doi": {
+      "type": "string",
+      "required": true,
+      "description": "论文 DOI，论文的全局唯一标识符，如 10.1016/j.dental.2023.01.001"
+    },
+    "pmid": {
+      "type": "string or null",
+      "required": false,
+      "description": "PubMed ID，部分论文（预印本等）可能无 PMID，填 null"
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "description": "论文完整标题，原文字面量，不做标准化处理"
+    },
+    "journal_title": {
+      "type": "string",
+      "required": true,
+      "description": "期刊名称，原文字面量"
+    },
+    "publication_year": {
+      "type": "integer",
+      "required": true,
+      "description": "论文发表年份，4 位整数，如 2023"
+    },
+    "entity_name_raw": {
+      "type": "string",
+      "required": true,
+      "description": "原文对象名，直接从论文中抽取的字面名称，如 'enamel binding peptide (EBP)'"
+    },
+    "entity_name_normalized": {
+      "type": "string",
+      "required": true,
+      "description": "标准化对象名，v0.1 采用氨基酸序列单字母缩写，如 'WGNYAYK'"
+    },
+    "sequence_raw": {
+      "type": "string",
+      "required": true,
+      "description": "原始氨基酸序列，单字母缩写，原文字面量，如 'WGNYAYK'"
+    },
+    "interaction_target": {
+      "type": "string",
+      "required": true,
+      "allowed_values": ["HAp", "enamel", "dentin", "collagen", "ACP", "other", "unclear"],
+      "description": "该肽段的主要作用对象。HAp = 纯羟基磷灰石晶体；enamel = 牙釉质（含 HAp 的生物矿化组织）；dentin = 牙本质；collagen = 胶原蛋白；ACP = 无定形磷酸钙；other = 其他；unclear = 无法判断。"
+    },
+    "interaction_target_reason": {
+      "type": "string",
+      "required": true,
+      "description": "【Reasoning 字段】判断 interaction_target 的依据，引用论文中的关键句或章节位置"
+    },
+    "summary_functions": {
+      "type": "array of string",
+      "required": true,
+      "allowed_values": ["adsorption", "remineralization", "mineralization", "anti_demineralization", "other"],
+      "description": "摘要层功能标签，最多选 3 个，只保留有直接实验证据支持的功能。adsorption = 吸附/结合；remineralization = 再矿化；mineralization = 矿化；anti_demineralization = 抑制脱矿；other = 其他。"
+    },
+    "summary_functions_reason": {
+      "type": "string",
+      "required": true,
+      "description": "【Reasoning 字段】判断 summary_functions 的依据，说明为何选取这些功能标签"
+    },
+    "evidence_overall_level": {
+      "type": "string",
+      "required": true,
+      "allowed_values": ["in_vitro", "ex_vivo", "animal_in_vivo", "clinical", "in_silico", "unclear"],
+      "description": "总体证据层级，反映该论文最高的证据层级。in_vitro = 体外实验（含离体牙体系，v0.1 统一归为此类）；ex_vivo = 离体组织实验（v0.2 细化）；animal_in_vivo = 动物体内实验；clinical = 临床研究；in_silico = 计算机模拟；unclear = 无法判断。"
+    },
+    "evidence_overall_level_reason": {
+      "type": "string",
+      "required": true,
+      "description": "【Reasoning 字段】判断 evidence_overall_level 的依据，引用论文中关键实验描述"
+    },
+    "model_system_summary": {
+      "type": "string",
+      "required": true,
+      "description": "摘要层模型说明，1 句话描述实验使用的生物学模型或体系，如 'bovine enamel subsurface demineralization model'"
+    },
+    "text_to_sequence": {
+      "type": "string",
+      "required": true,
+      "description": "序列来源定位，格式为章节锚点，如 'Methods > 2.1 Peptide preparation'。回答「sequence_raw 从论文哪里获取」。"
+    },
+    "text_to_function_summary": {
+      "type": "string",
+      "required": true,
+      "description": "功能来源定位，格式为章节锚点，如 'Abstract > Results/Conclusion'。回答「为什么认为有这些 summary_functions」。"
+    },
+    "text_to_evidence_summary": {
+      "type": "string",
+      "required": true,
+      "description": "证据来源定位，多个锚点以分号分隔，如 'Abstract > Results; Results > CLSM; Results > micro-CT'。回答「证据来自论文哪些位置」。"
+    },
+    "trace_status": {
+      "type": "string",
+      "required": true,
+      "allowed_values": ["complete", "partial", "missing", "disputed"],
+      "description": "溯源状态。complete = 核心来源字段（text_to_* 三个字段）均能清楚定位；partial = 能大致定位但不完整；missing = 找不到足够来源；disputed = 不同位置存在冲突。"
+    },
+    "trace_status_reason": {
+      "type": "string",
+      "required": true,
+      "description": "【Reasoning 字段】判断 trace_status 的依据，说明溯源情况"
+    },
+    "curator_note": {
+      "type": "string or null",
+      "required": false,
+      "description": "人工备注，LLM 抽取阶段填 null，或在有特殊情况时填写简短说明"
+    }
+  },
+
+  "fae_record_fields": {
+    "description": "FAE 子记录字段。每条记录对应一个功能 × 一种实验方法 × 一组结果。若同一功能由两种方法支持，拆成两条 FAE 记录。v0.1 测试论文预期产出 4 条。",
+    "fields": {
+      "function_label": {
+        "type": "string",
+        "required": true,
+        "allowed_values": ["adsorption", "remineralization", "mineralization", "anti_demineralization", "other"],
+        "description": "本条 FAE 对应的功能标签，与主表 summary_functions 中的单个值对应"
+      },
+      "evidence_level": {
+        "type": "string",
+        "required": true,
+        "allowed_values": ["in_vitro", "ex_vivo", "animal_in_vivo", "clinical", "in_silico", "unclear"],
+        "description": "本条实验的证据层级，可与主表 evidence_overall_level 不同（主表取最高层级）"
+      },
+      "assay_category": {
+        "type": "string",
+        "required": true,
+        "allowed_values": ["adsorption_binding", "remineralization_outcome", "mineral_morphology", "mechanical_property", "other"],
+        "description": "一级实验类别。adsorption_binding = 吸附/结合实验；remineralization_outcome = 再矿化结果测定；mineral_morphology = 矿物形态表征；mechanical_property = 力学性能测试；other = 其他"
+      },
+      "validation_method": {
+        "type": "string",
+        "required": true,
+        "standard_values": ["CLSM", "micro-CT", "nanoindentation", "SEM", "other"],
+        "description": "标准化方法名称，优先使用标准值中的名称；不在列表内的方法填写原文方法名"
+      },
+      "readout_main": {
+        "type": "string or null",
+        "required": false,
+        "description": "主要测量指标，描述该实验的核心读数类型，如 'fluorescence localization' / 'remineralization rate' / 'hardness'"
+      },
+      "result_text_summary": {
+        "type": "string",
+        "required": true,
+        "description": "结果短摘要，1-2 句话描述该方法的关键实验发现，来源于原文结果部分"
+      },
+      "text_to_evidence": {
+        "type": "string",
+        "required": true,
+        "description": "本条证据的来源定位，格式为章节锚点，如 'Results > CLSM'。回答「result_text_summary 原文出处在哪里」。"
+      },
+      "trace_status": {
+        "type": "string",
+        "required": true,
+        "allowed_values": ["complete", "partial", "missing", "disputed"],
+        "description": "本条 FAE 记录的溯源状态，含义与主表 trace_status 相同"
+      }
+    }
+  },
+
+  "output_example": {
+    "doi": "10.1016/j.dental.2023.01.001",
+    "pmid": "36854285",
+    "title": "Enamel binding peptide promotes remineralization of early caries lesions",
+    "journal_title": "Dental Materials",
+    "publication_year": 2023,
+    "entity_name_raw": "enamel binding peptide (EBP)",
+    "entity_name_normalized": "WGNYAYK",
+    "sequence_raw": "WGNYAYK",
+    "interaction_target": "HAp",
+    "interaction_target_reason": "论文第2页 Introduction 明确写 'binding to hydroxyapatite crystals'，且 Methods 中使用纯 HAp 粉末进行吸附实验",
+    "summary_functions": ["adsorption", "remineralization"],
+    "summary_functions_reason": "Abstract 写 'EBP significantly adsorbed onto HAp surface and promoted remineralization'，且 Results 有 CLSM 和 micro-CT 两项独立证据",
+    "evidence_overall_level": "in_vitro",
+    "evidence_overall_level_reason": "全文实验使用 bovine enamel 和 HAp 粉末体外模型，无动物实验或临床数据",
+    "model_system_summary": "bovine enamel subsurface demineralization model",
+    "text_to_sequence": "Methods > 2.1 Peptide preparation",
+    "text_to_function_summary": "Abstract > Results/Conclusion",
+    "text_to_evidence_summary": "Abstract > Results; Results > 3.1 CLSM; Results > 3.2 micro-CT",
+    "trace_status": "complete",
+    "trace_status_reason": "sequence、method（CLSM/micro-CT）、function（adsorption/remineralization）、evidence（体外体系）四类来源字段均有明确锚点",
+    "curator_note": null,
+    "fae_records": [
+      {
+        "function_label": "adsorption",
+        "evidence_level": "in_vitro",
+        "assay_category": "adsorption_binding",
+        "validation_method": "CLSM",
+        "readout_main": "fluorescence localization",
+        "result_text_summary": "FITC 标记的 EBP 在 CLSM 下显示明显的荧光富集于 HAp 表面，对照肽无明显荧光信号",
+        "text_to_evidence": "Results > 3.1 CLSM",
+        "trace_status": "complete"
+      },
+      {
+        "function_label": "remineralization",
+        "evidence_level": "in_vitro",
+        "assay_category": "remineralization_outcome",
+        "validation_method": "micro-CT",
+        "readout_main": "mineral density",
+        "result_text_summary": "micro-CT 显示 EBP 处理组矿物密度较对照组提高 23%，病损深度减少",
+        "text_to_evidence": "Results > 3.2 micro-CT",
+        "trace_status": "complete"
+      }
+    ]
+  }
+}
