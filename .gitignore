@@ -9,11 +9,28 @@ env/
 dist/
 build/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Environment
+# 真实密钥文件不进 Git
 .env
+.env.*
+!.env.example
+!.env.docker.example
 
-# Data (本地缓存，不进 Git)
+# Docker compose / local Docker env
+.env.docker
+.env.docker.local
+*.env.local
+
+# Docker / Notion automation runtime outputs
+.docker_review/
+
+# GitHub Action Review runtime outputs
+.review/
+
+# Data local cache
 data/papers/
 data/rag_index/
 data/task_cache/
@@ -34,10 +51,3 @@ FETCH_HEAD
 
 # macOS
 .DS_Store
-
-# Docker
-*.env.local
-
-# GitHub Action Review
-.review/
-.ruff_cache/
