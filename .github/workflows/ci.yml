@@ -94,12 +94,12 @@ jobs:
               });
             }
 
-			- name: Upload review artifacts
-			  if: always()
-			  uses: actions/upload-artifact@v4
-			  with:
-			    name: review-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
-			    path: .review/
+      - name: Upload review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
+          path: .review/
 
       - name: Fail if blocking review checks failed
         if: steps.render_review.outputs.blocking_failed == 'true'
