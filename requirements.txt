@@ -1,0 +1,37 @@
+# ==================== 当前在用的包 ====================
+openai>=1.58.0
+PyMuPDF==1.24.0
+python-dotenv==1.0.1
+httpx>=0.28.1
+
+# ==================== 未来会用到的包（为后续迁移准备） ====================
+
+# LLM 调用层（替换 openai）
+litellm>=1.82.0
+
+# PubMed 检索
+metapub>=0.5.0
+
+# PDF 处理
+docling>=0.5.0
+
+# 向量化与检索
+flagembedding>=1.0.0
+chromadb>=0.5.0
+
+# 结构化输出
+instructor>=0.6.0
+pydantic>=2.6.0
+
+# LangGraph & LangChain
+langgraph>=0.5.4
+langchain-community>=0.2.0
+
+# 数据库
+sqlmodel>=0.0.14
+
+# 可观测性
+langsmith>=0.1.4
+
+# UI
+streamlit>=1.32.0
