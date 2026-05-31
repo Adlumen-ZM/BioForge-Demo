@@ -1,0 +1,44 @@
+review:
+  name: BioForge structural review
+  comment_marker: "<!-- bioforge-structural-review -->"
+  comment_title: "BioForge structural review"
+  group_by: file
+
+  # 单条 PR comment 最多展示多少条问题，避免评论过长
+  max_items: 100
+
+  # 每个文件最多展示多少条问题，避免单个文件刷屏
+  max_items_per_file: 20
+
+  # 是否写入 GitHub Actions job summary
+  write_job_summary: true
+
+checks:
+  ruff:
+    enabled: true
+    blocking: true
+    output: ".review/ruff.json"
+
+  ruff_format:
+    enabled: true
+    blocking: true
+    output: ".review/ruff-format.txt"
+    exit_code_output: ".review/ruff-format.exitcode"
+
+  # 预留：后续再打开
+  mypy:
+    enabled: false
+    blocking: false
+    output: ".review/mypy.txt"
+
+  # 预留：后续再打开
+  bandit:
+    enabled: false
+    blocking: false
+    output: ".review/bandit.json"
+
+  # 预留：后续可用于自定义结构规则
+  semgrep:
+    enabled: false
+    blocking: false
+    output: ".review/semgrep.json"
