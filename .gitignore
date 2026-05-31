@@ -37,3 +37,7 @@ FETCH_HEAD
 
 # Docker
 *.env.local
+
+# GitHub Action Review
+.review/
+.ruff_cache/
