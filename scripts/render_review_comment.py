@@ -230,7 +230,7 @@ def main() -> None:
     ruff_failed = len(ruff_diagnostics) > 0
     blocking_failed = (ruff_blocking and ruff_failed) or (format_blocking and format_failed)
 
-    status = "failed" if blocking_failed else "passed"
+    status = "needs attention" if blocking_failed else "passed"
     emoji = "❌" if blocking_failed else "✅"
 
     success_message = review_config.get(
