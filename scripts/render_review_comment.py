@@ -235,23 +235,36 @@ def main() -> None:
     ruff_failed = len(ruff_diagnostics) > 0
     blocking_failed = (ruff_blocking and ruff_failed) or (format_blocking and format_failed)
 
-    status = "failed" if blocking_failed else "passed"
-    emoji = "❌" if blocking_failed else "✅"
-
-    lines: list[str] = [
-        marker,
-        f"# {title} {emoji}",
-        "",
-        f"Status: **{status}**",
-        "",
-        "This is an automated structural review. It checks low-level Python issues only; it is not a functional code review.",
-        "",
-        "## Summary",
-        "",
-        f"- Ruff lint: **{len(ruff_diagnostics)}** issue(s)",
-        f"- Ruff format: **{'failed' if format_failed else 'passed'}**",
-        "",
-    ]
+		status = "failed" if blocking_failed else "passed"
+		emoji = "❌" if blocking_failed else "✅"
+		
+		success_message = review_config.get(
+		    "success_message",
+		    "BioForge Review Bot: wangwang! 🐶 He's happy. No structural problems found.",
+		)
+		failure_message = review_config.get(
+		    "failure_message",
+		    "BioForge Review Bot found blocking structural issues. Please fix the items below.",
+		)
+		
+		main_message = failure_message if blocking_failed else success_message
+		
+		lines: list[str] = [
+		    marker,
+		    f"# {title} {emoji}",
+		    "",
+		    f"Status: **{status}**",
+		    "",
+		    f"> {main_message}",
+		    "",
+		    "This is an automated structural review. It checks low-level Python issues only; it is not a functional code review.",
+		    "",
+		    "## Summary",
+		    "",
+		    f"- Ruff lint: **{len(ruff_diagnostics)}** issue(s)",
+		    f"- Ruff format: **{'failed' if format_failed else 'passed'}**",
+		    "",
+		]
 
     if ruff_enabled:
         lines.append(render_ruff_section(ruff_diagnostics, max_items, max_items_per_file))
