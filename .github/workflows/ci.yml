@@ -1,78 +1,108 @@
-name: reviewdog
+name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
 
 jobs:
-  reviewdog:
-    name: reviewdog
+  review:
+    name: Structural review
     runs-on: ubuntu-latest
-
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-    permissions:
-      contents: read
-      pull-requests: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Ruff
+      - name: Install review tools
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install ruff pyyaml
 
-      - name: Set up reviewdog
-        uses: reviewdog/action-setup@v1.5.0
-        with:
-          reviewdog_version: v0.21.0
-
-      # 这一步只用来判断“是否有问题”
-      - name: Check Ruff status
-        id: ruff_check
+      - name: Run Ruff check
         run: |
-          if ruff check .; then
-            echo "clean=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "clean=false" >> "$GITHUB_OUTPUT"
-          fi
+          mkdir -p .review
+          ruff check . --output-format=json > .review/ruff.json || true
 
-      # 这一步继续把结果交给 reviewdog 发到 PR
-      # 用 --exit-zero 是为了让 reviewdog 这一步稳定执行，不被 Ruff 退出码中断
-      - name: Run reviewdog with Ruff
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run Ruff format check
         run: |
-          reviewdog \
-            -conf=.reviewdog.yml \
-            -runners=ruff \
-            -reporter=github-pr-review \
-            -filter-mode=nofilter
+          mkdir -p .review
+          set +e
+          ruff format --check . > .review/ruff-format.txt 2>&1
+          echo "$?" > .review/ruff-format.exitcode
+          exit 0
 
-      # 只有真正“无问题”才发 happy comment
-      - name: Post happy comment when Ruff is clean
-        if: steps.ruff_check.outputs.clean == 'true' && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+      - name: Render review comment
+        id: render_review
+        run: |
+          python scripts/render_review_comment.py
+
+      - name: Upsert PR review summary comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        continue-on-error: true
         with:
           script: |
+            const fs = require("fs");
+
+            const marker = "<!-- bioforge-structural-review -->";
+            const commentPath = ".review/comment.md";
+            const body = fs.readFileSync(commentPath, "utf8");
+
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issue_number = context.payload.pull_request.number;
 
-            const body = "ReviewDog: wangwang! He's happy. No problem.";
-
-            await github.rest.issues.createComment({
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner,
               repo,
               issue_number,
-              body
+              per_page: 100,
             });
+
+            const existing = comments.find((comment) => {
+              return comment.body && comment.body.includes(marker);
+            });
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+			- name: Upload review artifacts
+			  if: always()
+			  uses: actions/upload-artifact@v4
+			  with:
+			    name: review-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
+			    path: .review/
+
+      - name: Fail if blocking review checks failed
+        if: steps.render_review.outputs.blocking_failed == 'true'
+        run: |
+          echo "Blocking structural review checks failed."
+          exit 1
