@@ -3,6 +3,8 @@ review:
   comment_marker: "<!-- bioforge-structural-review -->"
   comment_title: "BioForge structural review"
   group_by: file
+  success_message: "BioForge Review Bot: Great! No structural problems found."
+  failure_message: "BioForge Review Bot found blocking structural issues. Please fix the items below."
 
   # 单条 PR comment 最多展示多少条问题，避免评论过长
   max_items: 100
