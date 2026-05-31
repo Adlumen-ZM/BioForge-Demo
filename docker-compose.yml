@@ -1,26 +1,21 @@
-# TODO: 根据数据库选型完善
-version: "3.9"
+version: "3.8"
 
 services:
-  db:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-bioforge}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bioforge}
-      POSTGRES_DB: ${POSTGRES_DB:-bioforge}
-    ports:
-      - "5432:5432"
+  pepclaw:
+    image: ${DOCKER_IMAGE}:${DOCKER_TAG}
+    container_name: pepclaw-container
+
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d
+      - ./.env:/app/.env
+      - ./v0_1PDF:/app/v0_1PDF
+      - ./data:/app/data
+      - ./v0_1results:/app/v0_1results
 
-  backend:
-    build: .
-    env_file: .env
-    depends_on:
-      - db
-    ports:
-      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BIZ_DB_PATH=/app/data/hap_v01.db
+      - TRACE_DB_PATH=/app/data/hap_trace.db
 
-volumes:
-  pgdata:
+    working_dir: /app
+    restart: "no"
+    command: python run_batch.py
