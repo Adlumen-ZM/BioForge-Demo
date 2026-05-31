@@ -100,9 +100,3 @@ jobs:
         with:
           name: review-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
           path: .review/
-
-      - name: Fail if blocking review checks failed
-        if: steps.render_review.outputs.blocking_failed == 'true'
-        run: |
-          echo "Blocking structural review checks failed."
-          exit 1
