@@ -1,9 +1,37 @@
 [tool.ruff]
 line-length = 120
+target-version = "py311"
+
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".review",
+    "data",
+    "rag_index",
+    "task_cache",
+]
 
 [tool.ruff.lint]
-# E/W: 基础风格  F: 常见错误  I: import排序  B: 潜在bug
-select = ["E", "W", "F", "I", "B"]
+select = [
+    "E9",  # syntax/runtime-level errors
+    "F",   # Pyflakes: undefined names, unused imports, f-string issues, etc.
+    "B",   # flake8-bugbear: common bug patterns
+    "I",   # import sorting
+]
 
-# 忽略行长度限制（已用line-length控制）
-ignore = ["E501"]
+ignore = [
+    "E501",  # line length: handled by formatter / readability judgment, not blocking initially
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
