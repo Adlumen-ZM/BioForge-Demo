@@ -25,6 +25,9 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# 加入 requirements.txt 便于后续比对版本
+COPY requirements.txt /app/requirements.txt
+
 # 当前镜像定位为环境镜像（environment image），不包含业务代码
 # 业务代码由使用者自行挂载或通过其他方式提供
 
