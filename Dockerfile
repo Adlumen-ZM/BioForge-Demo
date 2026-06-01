@@ -25,12 +25,8 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# 按 MS 当前版本保留业务代码复制逻辑
-# 注意：如果后续我们严格把镜像定位成“纯 environment image”，
-# 这里可以再和 MS 讨论是否移除 text_agent / db / run_batch.py 的 COPY。
-COPY text_agent/ ./text_agent/
-COPY db/ ./db/
-COPY run_batch.py .
+# 当前镜像定位为环境镜像（environment image），不包含业务代码
+# 业务代码由使用者自行挂载或通过其他方式提供
 
 # 创建必要目录
 RUN mkdir -p /app/data /app/v0_1PDF /app/v0_1results
@@ -40,5 +36,5 @@ ENV BIZ_DB_PATH=/app/data/hap_v01.db
 ENV TRACE_DB_PATH=/app/data/hap_trace.db
 ENV PYTHONUNBUFFERED=1
 
-# 默认启动命令
-CMD ["python", "run_batch.py"]
+# 默认启动命令（环境镜像，进入 Python 交互模式）
+CMD ["python"]
