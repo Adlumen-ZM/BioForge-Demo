@@ -235,7 +235,10 @@ def find_version_section(
 
 
 def make_text(content: str) -> list[dict[str, Any]]:
-    return [{"type": "text", "text": {"content": content[:2000]}}]
+    return [
+        {"type": "text", "text": {"content": content[i:i + 2000]}}
+        for i in range(0, len(content), 2000)
+    ]
 
 
 def update_paragraph_block(block_id: str, text: str, api_key: str) -> None:
