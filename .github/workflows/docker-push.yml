@@ -196,6 +196,7 @@ jobs:
         with:
           name: docker-precheck-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
           path: .docker_review/
+          include-hidden-files: true
 
       # 如果 precheck 不通过，则这里主动 fail。
       #
@@ -498,6 +499,7 @@ jobs:
         with:
           name: docker-build-result-${{ github.run_number }}-${{ github.run_attempt }}
           path: .docker_review/
+          include-hidden-files: true
 
   # ============================================================
   # Job 3: Notion writeback
@@ -592,3 +594,4 @@ jobs:
         with:
           name: docker-writeback-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
           path: .docker_review/
+          include-hidden-files: true
