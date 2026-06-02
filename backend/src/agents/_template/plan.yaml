@@ -1,0 +1,33 @@
+# _template/plan.yaml — 新 agent plan 骨架（复制后修改）
+# 将 my_agent 替换为实际 agent 名称，按实际业务逻辑填写 steps。
+
+plan_id: ""          # 留空则 planner.py 自动生成 UUID
+agent_name: "my_agent"   # ← 修改为实际 agent 名称
+version: "0.1"
+
+steps:
+  - step_id: "step_01"
+    name: "第一步（替换为实际名称）"
+    instruction: |
+      在此填写 LLM 的执行指令（注入 system prompt 的文本）。
+      说明此 step 需要做什么、如何做、输出什么格式。
+      建议明确指定 JSON 输出格式：{"field_a": "...", "field_b": [...]}
+    tools_required: []    # ← 填写本 step 可调用的 tool 名称（必须是 agent.py tools 的子集）
+    success_criteria:
+      required_fields:
+        - "field_a"       # ← 修改为实际必填字段
+      min_count: {}
+    max_retries: 2
+    db_write_policy: "none"  # "none" 或 "after_step"（写库由 graph 层处理）
+
+  - step_id: "step_02"
+    name: "第二步（替换为实际名称）"
+    instruction: |
+      此 step 的执行指令。
+      可引用上一步的产出（context_builder 会自动注入已完成 step 的摘要）。
+    tools_required: []
+    success_criteria:
+      required_fields: []
+      min_count: {}
+    max_retries: 2
+    db_write_policy: "none"

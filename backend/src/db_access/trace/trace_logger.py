@@ -1,3 +1,19 @@
+"""
+⚠️  DEPRECATED — 此文件已废弃，不应在新代码中 import。
+
+旧实现：SQLite 双表模型（extraction_runs + trace_steps），服务于旧版 TextAgent（extract_agent/）。
+
+新实现：Sink 模式事件流，见 backend/src/agents/agent_template/hooks.py
+  - TraceEvent / TraceBackend / NullBackend / TraceHook
+  - 四个固定事件：plan_start / step_start / step_end / plan_end
+  - 替换 trace backend 时 template 核心代码零改动
+
+保留此文件的原因：
+  - test_databases.py 中有大量针对 TraceLogger 的历史测试，保留以防引用。
+  - 旧版 extract_agent/text_agent.py 可能仍依赖此模块（迁移期）。
+  - 确认旧代码全部迁移后可删除此文件及 init_trace_db.py。
+"""
+
 from datetime import datetime, timezone
 import os
 import sqlite3

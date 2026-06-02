@@ -1,14 +1,17 @@
 # ==================== 当前在用的包 ====================
-# openai 包版本更新
+# openai 包版本更新（旧 extract_agent MVP 在用；新 template 统一走 LiteLLM，不直接 import openai）
 openai>=1.60.0
 
 PyMuPDF==1.24.0
 python-dotenv==1.0.1
 httpx>=0.28.1
 
-# ==================== 未来会用到的包（为后续迁移准备） ====================
+# ==================== AgentTemplate 层核心依赖 ====================
 
-# LLM 调用层（替换 openai）
+# YAML 加载（plan.yaml / identity.yaml），agent_template 必须
+pyyaml>=6.0
+
+# LLM 调用层（provider-agnostic，ChatLiteLLM 来自 langchain-community）
 litellm>=1.82.0
 
 # PubMed 检索
@@ -21,6 +24,7 @@ pydantic>=2.6.0
 # LangGraph & LangChain
 langgraph>=0.5.4
 langchain-community>=0.2.0
+langchain-litellm>=0.1.0  # langchain-community>=0.3.0 将 ChatLiteLLM 迁移至此包
 
 # 数据库
 sqlmodel>=0.0.14

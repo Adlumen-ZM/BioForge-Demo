@@ -1,0 +1,66 @@
+# search_agent/plan.yaml
+# SearchAgent 的预定义 plan，三步式检索流程。
+# plan_runner 按顺序执行，replanner 可在运行时修改内存中的 plan 对象（不回写此文件）。
+
+plan_id: "search_plan_v01"
+agent_name: "search_agent"
+version: "0.1"
+
+steps:
+  - step_id: "query_build"
+    name: "构建检索式"
+    instruction: |
+      根据研究目标，构建覆盖核心概念的 PubMed 检索式。
+      必须包含以下方面的同义词：
+        - 核心材料：HAp（hydroxyapatite）、calcium phosphate、biomineralization
+        - 调控因子：peptide、protein、amino acid、biomimetic
+        - 生物系统：bone、dentin、enamel、mineralization
+      输出 JSON 格式：{"query_string": "<PubMed 检索式>", "rationale": "<简短理由>"}
+    tools_required: []
+    success_criteria:
+      required_fields:
+        - "query_string"
+      min_count: {}
+    max_retries: 2
+    db_write_policy: "none"
+
+  - step_id: "search_execute"
+    name: "执行文献检索"
+    instruction: |
+      使用上一步生成的检索式（query_string）调用 pubmed_search 工具执行检索。
+      要求：
+        - max_results 设为 100
+        - 将返回的 paper_ids 存入输出
+      输出 JSON 格式：{"candidate_ids": ["<PMID>", ...], "search_stats": {"total_found": <int>}}
+    tools_required:
+      - "pubmed_search"
+    success_criteria:
+      required_fields:
+        - "candidate_ids"
+      min_count:
+        candidate_ids: 1
+    max_retries: 2
+    db_write_policy: "none"
+
+  - step_id: "dedup_filter"
+    name: "去重与初步过滤"
+    instruction: |
+      对 candidate_ids 进行去重（排除重复 ID），并记录去重后的结果。
+      当前阶段不做质量判断，只做 ID 级去重。
+      输出 JSON 格式：
+      {
+        "candidate_paper_ids": ["<PMID>", ...],
+        "dedup_stats": {
+          "before_dedup": <int>,
+          "after_dedup": <int>,
+          "removed_duplicates": <int>
+        }
+      }
+    tools_required: []
+    success_criteria:
+      required_fields:
+        - "candidate_paper_ids"
+      min_count:
+        candidate_paper_ids: 1
+    max_retries: 1
+    db_write_policy: "none"

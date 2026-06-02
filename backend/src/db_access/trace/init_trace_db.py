@@ -1,3 +1,13 @@
+"""
+⚠️  DEPRECATED — 此文件已废弃，不应在新代码中 import。
+
+旧实现：初始化 SQLite hap_trace.db，创建 extraction_runs / trace_steps 双表。
+
+新实现：Trace 基于 Sink 模式事件流，见 backend/src/agents/agent_template/hooks.py。
+新设计不依赖 SQLite，当前使用 NullBackend（只 print 不写入）；
+未来接 Postgres 时，在 db_access/trace/ 下新建 postgres_backend.py 实现 TraceBackend 接口。
+"""
+
 import os
 import sqlite3
 
