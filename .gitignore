@@ -1,43 +1,92 @@
-# Python
+# ====================
+# Python cache / build
+# ====================
 __pycache__/
 *.py[cod]
 *.pyo
-.venv/
-venv/
-env/
+*.pyd
+.Python
 *.egg-info/
 dist/
 build/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
 
-# Environment
+# ====================
+# Virtual environments
+# ====================
+.venv/
+venv/
+env/
+
+# ====================
+# Environment / secrets
+# ====================
 .env
+.env.*
+!.env.example
+!.env.docker.example
 
-# Data (本地缓存，不进 Git)
-data/papers/
-data/rag_index/
-data/task_cache/
-
-# Database files
-*.db
-*.sqlite
-
-# IDE
-.idea/
-.vscode/
-
-# Git internals
-FETCH_HEAD
-
-# Jupyter
-.ipynb_checkpoints/
-
-# macOS
-.DS_Store
-
-# Docker
+# ====================
+# Docker / compose local env
+# ====================
+.env.docker
+.env.docker.local
 *.env.local
 
-# GitHub Action Review
+# ====================
+# Automation runtime outputs
+# ====================
+.docker_review/
 .review/
-.ruff_cache/
+
+# ====================
+# Local runtime data
+# ====================
+data/*
+!data/.gitkeep
+
+v0_1PDF/
+v0_1results/
+
+# ====================
+# Database files
+# ====================
+*.db
+*.sqlite
+*.sqlite3
+
+# ====================
+# Logs
+# ====================
+*.log
+logs/
+
+# ====================
+# Test / local IO
+# ====================
+tests_io/inputs/*
+!tests_io/inputs/.gitkeep
+
+# 如果 tests_io/outputs 是人工确认过的 golden files，就不要忽略。
+# 如果 tests_io/outputs 只是本地运行产物，再打开下面两行：
+# tests_io/outputs/*
+# !tests_io/outputs/.gitkeep
+
+# ====================
+# IDE / OS
+# ====================
+.idea/
+.vscode/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# ====================
+# Git internals accidentally copied
+# ====================
+FETCH_HEAD
