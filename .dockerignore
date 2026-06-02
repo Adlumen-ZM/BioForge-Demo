@@ -1,35 +1,9 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
+# 当前 Dockerfile 构建的是 environment image：
+# 只需要 Dockerfile 和 requirements.txt。
+# 业务代码、docs、测试数据、Notion 脚本都不需要进入 Docker build context。
 
-.vscode/
-.idea/
-*.swp
-*.swo
+**
 
-.git/
-.gitignore
-
-*.md
-!README.md
-!CLAUDE.md
-
-data/
-db/data/
-v0_1PDF/
-v0_1results/
-
-.env
-.env.*
-
-*_test.py
-test_*
-
-*.log
-.DS_Store
-Thumbs.db
+!Dockerfile
+!requirements.txt
+!.dockerignore
