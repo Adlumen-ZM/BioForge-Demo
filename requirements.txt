@@ -14,13 +14,6 @@ litellm>=1.82.0
 # PubMed 检索
 metapub>=0.5.0
 
-# PDF 处理
-docling>=0.5.0
-
-# 向量化与检索
-flagembedding>=1.0.0
-chromadb>=0.5.0
-
 # 结构化输出
 instructor>=0.6.0
 pydantic>=2.6.0
@@ -34,9 +27,6 @@ sqlmodel>=0.0.14
 
 # 可观测性
 langsmith>=0.1.4
-
-# UI
-streamlit>=1.32.0
 
 # ==================== 本版本新增的包（为测试github action） ====================
 numpy>=1.20.0
