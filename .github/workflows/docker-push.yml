@@ -577,7 +577,7 @@ jobs:
           NOTION_VERSION: "2022-06-28"
         run: |
           python scripts/docker_notion_writeback.py
-好的 所以现在镜像会发生变化是吗 之前的镜像是否还能使用 我希望在本地测试一下能不能成功构建镜像应该使用什么命令
+          
       # 上传 writeback 后的完整产物，方便排查。
       #
       # 通常包括：
