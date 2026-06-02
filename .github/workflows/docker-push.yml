@@ -1,11 +1,11 @@
-name: Docker Environment Image
+﻿name: Docker Environment Image
 
 # 触发条件：
 # 只有当有人向 main 分支发起 PR，并且 Docker 环境相关文件发生变化时，才触发这个 workflow。
-# 因此我们当前策略是：
-#   - 普通业务代码改动不会触发 Docker 镜像构建；
+# 这符合我们当前策略：
+#   - 普通业务代码改动不触发 Docker 镜像构建；
 #   - 只有 Dockerfile / requirements / compose 等环境文件变化时才检查和构建；
-#   - 当前阶段镜像是 environment image，不是含业务代码的 application image。
+#   - 当前阶段镜像定位是 environment image，不是 application image。
 on:
   pull_request:
     branches: [main]
@@ -196,6 +196,7 @@ jobs:
         with:
           name: docker-precheck-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
           path: .docker_review/
+          include-hidden-files: true
 
       # 如果 precheck 不通过，则这里主动 fail。
       #
@@ -225,6 +226,7 @@ jobs:
   #
   # 这部分中间的 Docker 构建块是 MS 后续主要维护区域。
   # ============================================================
+  
   docker_build_push:
     name: Build and push Docker environment image
     runs-on: ubuntu-latest
@@ -253,6 +255,48 @@ jobs:
           name: docker-precheck-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
           path: .docker_review/
 
+      # 从 precheck artifact 重新读取 image/tag/full_image。
+      # 避免 job outputs 中 full_image 为空时，docker/build-push-action 拿不到 tags。
+      - name: Read Docker image metadata from precheck artifact
+        id: image_meta
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          precheck_path = Path(".docker_review/precheck.json")
+          if not precheck_path.exists():
+              raise SystemExit("Missing .docker_review/precheck.json. The precheck artifact was not downloaded correctly.")
+
+          data = json.loads(precheck_path.read_text(encoding="utf-8"))
+
+          version = str(data.get("version", "")).strip()
+          image = str(data.get("image", "")).strip()
+          tag = str(data.get("tag", "")).strip()
+          full_image = str(data.get("full_image", "")).strip()
+
+          if not full_image and image and tag:
+              full_image = f"{image}:{tag}"
+
+          if not image or not tag or not full_image:
+              raise SystemExit(
+                  f"Missing Docker image metadata: "
+                  f"version={version!r}, image={image!r}, tag={tag!r}, full_image={full_image!r}"
+              )
+
+          print(f"version={version}")
+          print(f"image={image}")
+          print(f"tag={tag}")
+          print(f"full_image={full_image}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"version={version}\n")
+              f.write(f"image={image}\n")
+              f.write(f"tag={tag}\n")
+              f.write(f"full_image={full_image}\n")
+          PY
+
       # 如果 should_build != true，说明不需要构建。
       #
       # 最常见原因：
@@ -265,10 +309,10 @@ jobs:
         id: write_skip_result
         if: needs.notion_precheck.outputs.should_build != 'true'
         env:
-          VERSION: ${{ needs.notion_precheck.outputs.version }}
-          IMAGE: ${{ needs.notion_precheck.outputs.image }}
-          TAG: ${{ needs.notion_precheck.outputs.tag }}
-          FULL_IMAGE: ${{ needs.notion_precheck.outputs.full_image }}
+          VERSION: ${{ steps.image_meta.outputs.version }}
+          IMAGE: ${{ steps.image_meta.outputs.image }}
+          TAG: ${{ steps.image_meta.outputs.tag }}
+          FULL_IMAGE: ${{ steps.image_meta.outputs.full_image }}
           DOCKER_CONFIG_HASH: ${{ needs.notion_precheck.outputs.docker_config_hash }}
         run: |
           mkdir -p .docker_review
@@ -316,7 +360,7 @@ jobs:
       #   - build-args: Docker build 参数
       #
       # 但建议不要改：
-      #   - tags: ${{ needs.notion_precheck.outputs.full_image }}
+      #   - tags: ${{ steps.image_meta.outputs.full_image }}
       #
       # 因为 image/tag 应该统一来自 Notion precheck。
       # ======================================================================
@@ -344,7 +388,7 @@ jobs:
       # 构建并推送 Docker 镜像。
       #
       # tags 完全来自 Notion precheck：
-      #   needs.notion_precheck.outputs.full_image
+      #   steps.image_meta.outputs.full_image
       #
       # 例如：
       #   adlumen/pepclaw-env:0.1.0
@@ -358,11 +402,11 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ needs.notion_precheck.outputs.full_image }}
+          tags: ${{ steps.image_meta.outputs.full_image }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.notion_precheck.outputs.version }}
+            org.opencontainers.image.version=${{ steps.image_meta.outputs.version }}
             org.opencontainers.image.title=Fudan-BioForge Docker environment image
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -378,7 +422,7 @@ jobs:
         if: needs.notion_precheck.outputs.should_build == 'true' && steps.build.outcome == 'success'
         continue-on-error: true
         env:
-          FULL_IMAGE: ${{ needs.notion_precheck.outputs.full_image }}
+          FULL_IMAGE: ${{ steps.image_meta.outputs.full_image }}
         run: |
           mkdir -p .docker_review
           docker pull "$FULL_IMAGE"
@@ -398,10 +442,10 @@ jobs:
         id: write_success_result
         if: needs.notion_precheck.outputs.should_build == 'true' && steps.build.outcome == 'success'
         env:
-          VERSION: ${{ needs.notion_precheck.outputs.version }}
-          IMAGE: ${{ needs.notion_precheck.outputs.image }}
-          TAG: ${{ needs.notion_precheck.outputs.tag }}
-          FULL_IMAGE: ${{ needs.notion_precheck.outputs.full_image }}
+          VERSION: ${{ steps.image_meta.outputs.version }}
+          IMAGE: ${{ steps.image_meta.outputs.image }}
+          TAG: ${{ steps.image_meta.outputs.tag }}
+          FULL_IMAGE: ${{ steps.image_meta.outputs.full_image }}
           DIGEST: ${{ steps.build.outputs.digest }}
           DOCKER_CONFIG_HASH: ${{ needs.notion_precheck.outputs.docker_config_hash }}
         run: |
@@ -448,10 +492,10 @@ jobs:
       - name: Write failed Docker build result
         if: failure() && needs.notion_precheck.outputs.should_build == 'true'
         env:
-          VERSION: ${{ needs.notion_precheck.outputs.version }}
-          IMAGE: ${{ needs.notion_precheck.outputs.image }}
-          TAG: ${{ needs.notion_precheck.outputs.tag }}
-          FULL_IMAGE: ${{ needs.notion_precheck.outputs.full_image }}
+          VERSION: ${{ steps.image_meta.outputs.version }}
+          IMAGE: ${{ steps.image_meta.outputs.image }}
+          TAG: ${{ steps.image_meta.outputs.tag }}
+          FULL_IMAGE: ${{ steps.image_meta.outputs.full_image }}
           DOCKER_CONFIG_HASH: ${{ needs.notion_precheck.outputs.docker_config_hash }}
         run: |
           mkdir -p .docker_review
@@ -498,7 +542,8 @@ jobs:
         with:
           name: docker-build-result-${{ github.run_number }}-${{ github.run_attempt }}
           path: .docker_review/
-
+          include-hidden-files: true
+          
   # ============================================================
   # Job 3: Notion writeback
   #
@@ -577,7 +622,7 @@ jobs:
           NOTION_VERSION: "2022-06-28"
         run: |
           python scripts/docker_notion_writeback.py
-
+          
       # 上传 writeback 后的完整产物，方便排查。
       #
       # 通常包括：
@@ -592,3 +637,4 @@ jobs:
         with:
           name: docker-writeback-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
           path: .docker_review/
+          include-hidden-files: true
