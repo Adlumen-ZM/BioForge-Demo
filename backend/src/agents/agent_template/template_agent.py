@@ -68,9 +68,10 @@ class AgentTemplate:
 
         # ── 构造 TraceHook（默认 NullBackend，可在外部替换 hook.backend）──
         # run_id 在每次 run() 中由 PlanRunner 生成，此处先用占位符
+        # stage = config.agent_name（如 "search_agent"），与 DB stage 列对应
         self.hook = TraceHook(
-            run_id="__unset__",  # 每次 run() 前由 PlanRunner 更新
-            agent_name=config.agent_name,
+            run_id="__unset__",  # 每次 run() 前由 PlanRunner 更新（pipeline_run_id 或 agent_run_id）
+            stage=config.agent_name,
             backend=NullBackend(),
             enabled=config.enable_trace,
         )
@@ -86,6 +87,7 @@ class AgentTemplate:
         self,
         pipeline_state: Optional[dict[str, Any]] = None,
         upstream_context: Optional[dict[str, Any]] = None,
+        run_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """执行完整 agent run，返回可 merge 进 PipelineState 的 patch dict。
 
@@ -94,6 +96,8 @@ class AgentTemplate:
             upstream_context: 可选，上游 agent 的输出片段（直接注入 context_builder）。
                               若 None 且 pipeline_state 非空，此方法不自动从中提取
                               （graph 层负责决定传哪些字段给各 agent）。
+            run_id: pipeline 级别 run_id（由 graph 层传入，如 PipelineState["run_id"]）。
+                    若为 None（独立调试），trace 中 run_id 与 agent_run_id 相同。
 
         Returns:
             dict patch，供调用方 merge 进 PipelineState。
@@ -103,10 +107,11 @@ class AgentTemplate:
         import copy
         plan_copy = copy.deepcopy(self.plan)
 
-        # PlanRunner 负责生成 run_id 并同步到 hook
+        # PlanRunner 负责生成 agent_run_id 并将 pipeline_run_id 同步到 hook
         run_result: AgentRunResult = self._runner.run(
             plan=plan_copy,
             upstream_context=upstream_context,
+            pipeline_run_id=run_id,
         )
 
         # 将 AgentRunResult 适配为 PipelineState patch

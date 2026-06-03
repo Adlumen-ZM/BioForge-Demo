@@ -55,6 +55,15 @@ class PipelineState(TypedDict, total=False):
     extract_summary: str
     """extract_agent 的运行摘要，由 output_adapter 生成。"""
 
+    # ── Trace 关联 ────────────────────────────────────────────────────────
+    run_id: str
+    """pipeline 级别 run_id（由 graph/pipeline.py 生成，格式如 "pipe_<uuid4_hex[:12]>"）。
+    通过 agent.run(run_id=state["run_id"]) 传入各 AgentTemplate，
+    确保同一 pipeline run 的所有 trace 事件共享同一 run_id，便于在 DB 中聚合查询。
+    独立调试（不走 pipeline）时可不传，TraceHook 会自动使用 agent_run_id 作为 fallback。
+    （Trace MVP 新增，total=False 保证旧代码不传此字段时不报错）
+    """
+
     # ── 通用元数据 ────────────────────────────────────────────────────────
     run_metadata: dict[str, Any]
     """最后一次 agent run 的元数据（run_id / agent_name / status / step_count），

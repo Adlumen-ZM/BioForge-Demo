@@ -638,13 +638,13 @@ class TestHooks:
     def test_null_backend_no_exception(self):
         from backend.src.agents.agent_template.hooks import NullBackend, TraceEvent
         backend = NullBackend()
-        event = TraceEvent(run_id="r1", agent_name="a", event_type="plan_start", status="running")
+        event = TraceEvent(run_id="r1", stage="a", event_type="plan_start", status="running")
         # NullBackend 只 print，不应抛异常
         backend.write(event)
 
     def test_trace_hook_four_methods(self, capsys):
         from backend.src.agents.agent_template.hooks import TraceHook
-        hook = TraceHook(run_id="r1", agent_name="test", enabled=True)
+        hook = TraceHook(run_id="r1", stage="test", enabled=True)
         plan = make_plan()
         step = plan.steps[0]
         result = make_step_result()
@@ -671,14 +671,14 @@ class TestHooks:
             def write(self, event: TraceEvent) -> None:
                 raise RuntimeError("存储崩溃")
 
-        hook = TraceHook(run_id="r1", agent_name="test", backend=BrokenBackend(), enabled=True)
+        hook = TraceHook(run_id="r1", stage="test", backend=BrokenBackend(), enabled=True)
         plan = make_plan()
         # 即使 backend 崩溃，on_plan_start 也不应抛异常
         hook.on_plan_start(plan)  # 不会抛异常
 
     def test_disabled_hook_no_output(self, capsys):
         from backend.src.agents.agent_template.hooks import TraceHook
-        hook = TraceHook(run_id="r1", agent_name="test", enabled=False)
+        hook = TraceHook(run_id="r1", stage="test", enabled=False)
         plan = make_plan()
         hook.on_plan_start(plan)
         hook.on_step_start(plan.steps[0])
@@ -687,13 +687,72 @@ class TestHooks:
 
     def test_step_end_calculates_duration(self, capsys):
         from backend.src.agents.agent_template.hooks import TraceHook
-        hook = TraceHook(run_id="r1", agent_name="test", enabled=True)
+        hook = TraceHook(run_id="r1", stage="test", enabled=True)
         step = make_plan_step()
         result = make_step_result()
         hook.on_step_start(step)   # 记录开始时间
         hook.on_step_end(step, result, 0)
         captured = capsys.readouterr()
         assert "duration_ms" in captured.out
+
+    def test_trace_event_has_agent_run_id(self):
+        """TraceEvent 应包含 agent_run_id 字段，to_dict() 应输出该字段。"""
+        from backend.src.agents.agent_template.hooks import TraceEvent
+        event = TraceEvent(
+            run_id="pipe_001",
+            stage="search_agent",
+            event_type="plan_start",
+            status="running",
+            agent_run_id="run_abc123def456",
+        )
+        d = event.to_dict()
+        assert "agent_run_id" in d
+        assert d["agent_run_id"] == "run_abc123def456"
+        assert d["run_id"] == "pipe_001"
+        assert d["stage"] == "search_agent"
+        # 确认旧字段名不再出现
+        assert "agent_name" not in d
+
+    def test_trace_hook_stage_and_agent_run_id(self, capsys):
+        """TraceHook 使用 stage= 构造，agent_run_id 正确传入 TraceEvent。"""
+        from backend.src.agents.agent_template.hooks import TraceHook
+        hook = TraceHook(run_id="pipe_001", stage="search_agent", enabled=True)
+        hook.agent_run_id = "run_abc123def456"  # 模拟 PlanRunner 设置的 agent_run_id
+
+        plan = make_plan()
+        hook.on_plan_start(plan)
+        captured = capsys.readouterr()
+
+        # 输出应包含 stage 和 agent_run 信息
+        assert "search_agent" in captured.out
+        assert "run_abc123def456" in captured.out
+
+    def test_run_id_propagation(self, tmp_path):
+        """PlanRunner.run(pipeline_run_id='pipe_x') 后，hook.run_id 应为 'pipe_x'，
+        hook.agent_run_id 应为内部生成的 'run_<hex>' 格式。"""
+        from backend.src.agents.agent_template.plan_runner import PlanRunner
+        from backend.src.agents.agent_template.hooks import TraceHook
+        from unittest.mock import patch
+
+        cfg = make_config(tmp_path)
+        identity = {
+            "agent_name": "test_agent",
+            "role": "测试",
+            "objective": "测试",
+            "output_contract": {},
+        }
+        hook = TraceHook(run_id="__unset__", stage="test_agent", enabled=False)
+        runner = PlanRunner(config=cfg, identity=identity, hook=hook)
+
+        with patch("backend.src.agents.agent_template.plan_runner.exec_module.run_step") as mock_rs, \
+             patch("backend.src.agents.agent_template.plan_runner.validate_plan", return_value=(True, "")):
+            mock_rs.return_value = make_step_result("step_01", "success", {"result": "ok"})
+            runner.run(make_plan(), pipeline_run_id="pipe_x")
+
+        assert hook.run_id == "pipe_x"
+        assert hook.agent_run_id is not None
+        assert hook.agent_run_id.startswith("run_")
+        assert hook.agent_run_id != "pipe_x"  # pipeline ID 与 agent ID 不同
 
 
 # =============================================================================
@@ -759,7 +818,7 @@ class TestPlanRunner:
             "objective": "测试",
             "output_contract": {},
         }
-        hook = TraceHook(run_id="r1", agent_name="test_agent", enabled=False)
+        hook = TraceHook(run_id="r1", stage="test_agent", enabled=False)
         return PlanRunner(config=cfg, identity=identity, hook=hook)
 
     @patch("backend.src.agents.agent_template.plan_runner.exec_module.run_step")
@@ -844,3 +903,109 @@ class TestRegistry:
         assert "custom_test_tool" in list_registered_tools()
         tools = get_tools(["custom_test_tool"])
         assert len(tools) == 1
+
+
+# =============================================================================
+# 15. PostgresBackend 测试
+# =============================================================================
+
+class TestPostgresBackend:
+    def test_write_no_raise_when_no_url(self, monkeypatch):
+        """TRACE_DB_URL 未设置时，write() 应静默跳过，不抛异常。"""
+        monkeypatch.delenv("TRACE_DB_URL", raising=False)
+        # 清除 lru_cache，确保本次测试重新读取环境变量
+        from backend.src.db_access.trace import postgres_backend as pb_mod
+        pb_mod.get_trace_engine.cache_clear()
+
+        from backend.src.db_access.trace.postgres_backend import PostgresBackend
+        from backend.src.agents.agent_template.hooks import TraceEvent
+        backend = PostgresBackend()
+        event = TraceEvent(
+            run_id="pipe_test",
+            stage="search_agent",
+            event_type="plan_start",
+            status="running",
+        )
+        # 不应抛异常
+        backend.write(event)
+
+    def test_write_no_raise_on_db_error(self, monkeypatch):
+        """DB 连接失败时，write() 应 print 警告并静默跳过，不抛异常。"""
+        monkeypatch.setenv("TRACE_DB_URL", "postgresql://invalid:invalid@localhost:9999/nodb")
+        from backend.src.db_access.trace import postgres_backend as pb_mod
+        pb_mod.get_trace_engine.cache_clear()
+
+        from backend.src.db_access.trace.postgres_backend import PostgresBackend
+        from backend.src.agents.agent_template.hooks import TraceEvent
+        backend = PostgresBackend()
+        event = TraceEvent(
+            run_id="pipe_test",
+            stage="search_agent",
+            event_type="step_end",
+            status="failed",
+        )
+        # DB 连接必然失败，但 write() 不应抛异常
+        backend.write(event)
+
+        # 清理缓存（避免影响其他测试）
+        pb_mod.get_trace_engine.cache_clear()
+
+
+# =============================================================================
+# 16. PipelineTraceHook 测试
+# =============================================================================
+
+class TestPipelineTraceHook:
+    def test_four_methods_produce_events(self, capsys):
+        """四个方法各产出一条 trace 事件，event_type 和 stage 正确。"""
+        from backend.src.db_access.trace.pipeline_hook import PipelineTraceHook
+        hook = PipelineTraceHook(run_id="pipe_001", enabled=True)
+
+        hook.on_pipeline_start({"input_ids": ["A", "B"]})
+        hook.on_node_start("search_node")
+        hook.on_node_end("search_node", status="success", agent_run_id="run_abc123")
+        hook.on_pipeline_end(status="success")
+
+        captured = capsys.readouterr()
+        assert "pipeline_start" in captured.out
+        assert "node_start" in captured.out
+        assert "node_end" in captured.out
+        assert "pipeline_end" in captured.out
+        assert "search_node" in captured.out
+        assert "pipeline" in captured.out
+
+    def test_node_end_includes_agent_run_id(self, capsys):
+        """on_node_end 传入的 agent_run_id 应出现在 trace 输出中。"""
+        from backend.src.db_access.trace.pipeline_hook import PipelineTraceHook
+        hook = PipelineTraceHook(run_id="pipe_001", enabled=True)
+        hook.on_node_start("search_node")
+        hook.on_node_end("search_node", status="success", agent_run_id="run_deadbeef0001")
+        captured = capsys.readouterr()
+        assert "run_deadbeef0001" in captured.out
+
+    def test_disabled_hook_no_output(self, capsys):
+        """enabled=False 时所有方法不产生任何输出。"""
+        from backend.src.db_access.trace.pipeline_hook import PipelineTraceHook
+        hook = PipelineTraceHook(run_id="pipe_001", enabled=False)
+        hook.on_pipeline_start()
+        hook.on_node_start("search_node")
+        hook.on_node_end("search_node", status="success")
+        hook.on_pipeline_end(status="success")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_write_failure_does_not_propagate(self):
+        """BrokenBackend 崩溃时，hook 方法不应向上抛异常。"""
+        from backend.src.db_access.trace.pipeline_hook import PipelineTraceHook
+        from backend.src.agents.agent_template.hooks import TraceBackend, TraceEvent
+
+        class BrokenBackend(TraceBackend):
+            def write(self, event: TraceEvent) -> None:
+                raise RuntimeError("后端崩溃")
+
+        hook = PipelineTraceHook(run_id="pipe_001", backend=BrokenBackend(), enabled=True)
+        # 不应抛异常
+        hook.on_pipeline_start()
+        hook.on_node_start("search_node")
+        hook.on_node_end("search_node", status="failed")
+        hook.on_pipeline_end(status="failed")

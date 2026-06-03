@@ -66,12 +66,15 @@ class PlanRunner:
         self,
         plan: Plan,
         upstream_context: Optional[dict[str, Any]] = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> AgentRunResult:
         """执行完整 plan，返回 AgentRunResult。
 
         Args:
             plan: 由 planner.load_plan() 加载的 Plan 对象（内存中可修改）。
             upstream_context: 来自上游 agent 的 PipelineState 片段（可选）。
+            pipeline_run_id: pipeline 级别 run_id（由 graph 层传入）。
+                             若为 None（独立调试），则与 agent_run_id 相同。
 
         Returns:
             AgentRunResult，status 为 'success' / 'failed' / 'partial'。
@@ -84,7 +87,11 @@ class PlanRunner:
         )
 
         # ── trace 固定位置 1：plan_start ─────────────────────────────────────
-        self.hook.run_id = state.run_id  # 将生成的 run_id 同步给 hook
+        # 两级 run_id 同步：
+        #   agent_run_id → 本次 agent run 内部 ID（TemplateAgentState 生成的 "run_<12hex>"）
+        #   run_id       → pipeline 级别 ID（来自 graph 层）；独立调试时退回 agent_run_id
+        self.hook.agent_run_id = state.run_id
+        self.hook.run_id = pipeline_run_id if pipeline_run_id is not None else state.run_id
         self.hook.on_plan_start(plan)
 
         aborted = False

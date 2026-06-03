@@ -28,6 +28,8 @@ langchain-litellm>=0.1.0  # langchain-community>=0.3.0 将 ChatLiteLLM 迁移至
 
 # 数据库
 sqlmodel>=0.0.14
+sqlalchemy>=2.0          # Trace MVP: PostgresBackend 使用 SQLAlchemy Core（sqlmodel 已隐式依赖，此处显式声明）
+psycopg[binary]>=3.1     # Trace MVP: Postgres 驱动（psycopg3，与 psycopg2-binary 兼容旧连接串格式）
 
 # 可观测性
 langsmith>=0.1.4
