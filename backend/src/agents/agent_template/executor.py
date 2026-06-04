@@ -149,6 +149,11 @@ def _extract_final_message(invoke_result: dict) -> str:
 
     LangGraph create_react_agent 返回 {'messages': [...]},
     最后一条消息应为 AIMessage，其 content 即最终回答。
+
+    兼容性说明：
+      LangChain 1.x+ 在多模态或部分 LLM provider（如 GLM、Kimi 等）下，
+      AIMessage.content 可能返回 list（形如 [{"type": "text", "text": "..."}]）
+      而非 str。此处做统一归一化，确保始终返回字符串。
     """
     messages = invoke_result.get("messages", [])
     if not messages:
@@ -156,7 +161,19 @@ def _extract_final_message(invoke_result: dict) -> str:
 
     last_msg = messages[-1]
     content = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-    return content
+
+    # ── 归一化：list → str（新版 LangChain 多模态 content 格式兼容）────────
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                # {"type": "text", "text": "..."} 格式
+                text_parts.append(block.get("text", ""))
+            else:
+                text_parts.append(str(block))
+        content = "\n".join(part for part in text_parts if part)
+
+    return content if isinstance(content, str) else str(content)
 
 
 def _extract_output(text: str, step: PlanStep) -> dict[str, Any]:
