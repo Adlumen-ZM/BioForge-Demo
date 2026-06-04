@@ -257,20 +257,34 @@ if quick_run:
                 status_bar.error(f"❌ 运行出错：{event.get('error')}")
                 break
 
-            # step_start → running；step_end → success/failed
+            # step_start → running；step_end → success/failed；LLM trace → 追加到 step
             step_id = event.get("step_id")
-            if step_id:
+            _LLM_ETYPES = {"llm_start", "llm_end", "tool_call", "tool_result", "llm_error"}
+
+            if etype in _LLM_ETYPES and step_id and step_id in steps_state:
+                # LLM/工具调用事件：追加到对应 step 的 llm_trace 列表
+                steps_state[step_id].setdefault("llm_trace", []).append(event)
+                updated = True
+            elif step_id:
                 if etype == "step_start":
-                    steps_state[step_id] = {**event, "status": "running"}
+                    steps_state[step_id] = {**event, "status": "running", "llm_trace": []}
                 elif etype == "step_end":
-                    steps_state[step_id] = event
+                    existing = steps_state.get(step_id, {})
+                    start_payload = existing.get("payload") or {}
+                    end_payload = event.get("payload") or {}
+                    steps_state[step_id] = {
+                        **existing, **event,
+                        "payload": {**start_payload, **end_payload},
+                        "llm_trace": existing.get("llm_trace", []),
+                    }
                 updated = True
 
         if updated and steps_state:
             from components.ui_helpers import render_step_card, STATUS_ICONS
             with placeholder.container():
                 for sid, sdata in sorted(steps_state.items()):
-                    render_step_card(sdata, expanded=False)
+                    llm_evs = sdata.get("llm_trace") or None
+                    render_step_card(sdata, expanded=False, llm_events=llm_evs)
 
         time.sleep(0.15)
 

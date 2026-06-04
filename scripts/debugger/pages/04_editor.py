@@ -107,25 +107,42 @@ EXPERIMENTS_DIR.mkdir(exist_ok=True)
 # 辅助：更新 steps_state
 # ─────────────────────────────────────────────
 
-def _update_steps_state(steps_state: dict[str, Any], event: dict[str, Any]) -> None:
-    """根据 TraceEvent dict 更新 steps_state。
+_LLM_TRACE_ETYPES = {"llm_start", "llm_end", "tool_call", "tool_result", "llm_error"}
 
-    step_start → status=running（占位）
+
+def _update_steps_state(steps_state: dict[str, Any], event: dict[str, Any]) -> None:
+    """根据 TraceEvent / LLM Trace 事件 dict 更新 steps_state。
+
+    step_start → status=running（占位），初始化 llm_trace=[]
     step_end   → 完整事件数据（含 status / output / duration 等）
+    llm_start / llm_end / tool_call / tool_result / llm_error
+               → 追加到对应 step 的 llm_trace 列表
     其他事件（plan_start/plan_end）→ 忽略
 
     Args:
-        steps_state: 当前 step 状态 dict（step_id → event dict），就地修改。
-        event: 从 progress_queue 取出的 TraceEvent dict。
+        steps_state: step_id → 事件状态 dict，就地修改。
+                     每条记录额外含 "llm_trace": list[dict] 字段。
+        event: 从 progress_queue 取出的事件 dict。
     """
     etype   = event.get("event_type", event.get("type", ""))
     step_id = event.get("step_id")
 
+    # ── LLM Trace 事件：追加到对应 step 的 llm_trace 列表 ─────────────────
+    if etype in _LLM_TRACE_ETYPES:
+        if step_id and step_id in steps_state:
+            steps_state[step_id].setdefault("llm_trace", []).append(event)
+        return  # LLM trace 事件不修改 step 的其他字段
+
+    # ── 普通 step 事件 ────────────────────────────────────────────────────
     if not step_id:
         return
 
     if etype == "step_start":
-        steps_state[step_id] = {**event, "status": "running"}
+        steps_state[step_id] = {
+            **event,
+            "status": "running",
+            "llm_trace": [],  # 初始化空列表，后续 LLM 事件追加进来
+        }
     elif etype == "step_end":
         # 合并 step_start 的 payload（含 tools_required）到 step_end 数据
         existing = steps_state.get(step_id, {})
@@ -133,24 +150,41 @@ def _update_steps_state(steps_state: dict[str, Any], event: dict[str, Any]) -> N
         end_payload = event.get("payload") or {}
         # step_end payload 优先，但保留 step_start 独有的字段（如 tools_required）
         merged_payload = {**start_payload, **end_payload}
-        steps_state[step_id] = {**existing, **event, "payload": merged_payload}
+        steps_state[step_id] = {
+            **existing,
+            **event,
+            "payload": merged_payload,
+            "llm_trace": existing.get("llm_trace", []),  # 保留已积累的 LLM 事件
+        }
 
 
 def _render_streaming_view(steps_state: dict[str, Any]) -> None:
     """在 placeholder.container() 中渲染当前所有 step 的卡片。
 
-    running 状态的 step 用 spinner 占位；
-    已完成的用 render_step_card 渲染。
+    running 状态的 step：显示蓝色进度提示 + 已捕获的实时 LLM 事件；
+    已完成的 step：渲染完整 step 卡片（含 LLM 思考链折叠区）。
 
     Args:
-        steps_state: step_id → event dict。
+        steps_state: step_id → 事件状态 dict。
     """
     for sid, sdata in sorted(steps_state.items()):
-        status = sdata.get("status", "unknown")
+        status     = sdata.get("status", "unknown")
+        llm_events = sdata.get("llm_trace", [])
+
         if status == "running":
-            st.info(f"🔄 **{sid}** — 执行中...")
+            # 实时进度：显示已捕获到的 LLM/工具事件数量
+            llm_cnt  = sum(1 for e in llm_events if e.get("event_type") == "llm_end")
+            tool_cnt = sum(1 for e in llm_events if e.get("event_type") == "tool_call")
+            detail = []
+            if llm_cnt:
+                detail.append(f"LLM×{llm_cnt}")
+            if tool_cnt:
+                detail.append(f"工具×{tool_cnt}")
+            hint = ("  |  " + ", ".join(detail)) if detail else ""
+            st.info(f"🔄 **{sid}** — 执行中...{hint}")
         else:
-            render_step_card(sdata, expanded=(status == "failed"))
+            render_step_card(sdata, expanded=(status == "failed"),
+                             llm_events=llm_events or None)
 
 
 # ─────────────────────────────────────────────

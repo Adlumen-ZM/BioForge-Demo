@@ -121,7 +121,8 @@ def render_status_badge(status: str) -> str:
 # render_step_card
 # ─────────────────────────────────────────────
 
-def render_step_card(step_data: dict[str, Any], expanded: bool = True) -> None:
+def render_step_card(step_data: dict[str, Any], expanded: bool = True,
+                     llm_events: list[dict[str, Any]] | None = None) -> None:
     """渲染单个 step 的详情卡片（st.expander 包裹）。
 
     TraceEvent.to_dict() 的实际结构：
@@ -216,6 +217,88 @@ def render_step_card(step_data: dict[str, Any], expanded: bool = True) -> None:
         if status == "failed" and issues:
             st.divider()
             st.error(f"❌ 错误：{issues}")
+
+        # ── LLM 思考链（由 _UITracer 捕获的实时回调事件）
+        if llm_events is not None:
+            st.divider()
+            with st.expander("🧠 LLM 思考链（ReAct 详情）", expanded=False):
+                render_llm_trace(llm_events)
+
+
+# ─────────────────────────────────────────────
+# render_llm_trace
+# ─────────────────────────────────────────────
+
+def render_llm_trace(llm_events: list[dict[str, Any]]) -> None:
+    """在 st.expander 内渲染 LLM / 工具调用的思考链。
+
+    每次 step 执行时，create_react_agent 的完整 ReAct 循环：
+      LLM call 1（决策 → 选择工具）→ tool_call → tool_result → LLM call 2（总结）
+
+    事件格式（由 _UITracer 写入 progress_queue）：
+      {"event_type": "llm_start",   "content": "...", "model": "..."}
+      {"event_type": "llm_end",     "content": "..."}
+      {"event_type": "tool_call",   "tool": "mock_success", "input": "..."}
+      {"event_type": "tool_result", "output": "..."}
+      {"event_type": "llm_error",   "error": "..."}
+
+    Args:
+        llm_events: 该 step 的 LLM/tool 事件列表（按时间顺序）。
+    """
+    if not llm_events:
+        st.caption("暂无 LLM 调用记录（步骤运行结束后显示）")
+        return
+
+    call_num = 0  # LLM call 编号
+    for ev in llm_events:
+        etype = ev.get("event_type", "")
+
+        if etype == "llm_start":
+            call_num += 1
+            model = ev.get("model", "")
+            label = f"🤖 LLM Call #{call_num}" + (f" `{model}`" if model else "")
+            with st.expander(label, expanded=False):
+                content = ev.get("content", "")
+                if content:
+                    st.caption("**输入（用户/系统消息摘要）：**")
+                    st.text(content)
+                else:
+                    st.caption("（无输入内容）")
+
+        elif etype == "llm_end":
+            content = ev.get("content", "")
+            if content:
+                # 判断是否是 tool_use 响应（含 tool call）还是最终回答
+                is_final = call_num > 1  # 第2次及以后通常是最终回答
+                icon = "💬 最终回答" if is_final else "💭 LLM 决策"
+                with st.expander(icon, expanded=is_final):
+                    st.text(content)
+
+        elif etype == "tool_call":
+            tool = ev.get("tool", "?")
+            inp  = ev.get("input", "")
+            with st.expander(f"🔧 调用工具：`{tool}`", expanded=True):
+                st.caption("**入参：**")
+                # 尝试以 JSON 格式渲染入参
+                try:
+                    import json as _json
+                    parsed = _json.loads(inp) if isinstance(inp, str) else inp
+                    st.code(_json.dumps(parsed, ensure_ascii=False, indent=2), language="json")
+                except Exception:
+                    st.text(str(inp))
+
+        elif etype == "tool_result":
+            output = ev.get("output", "")
+            with st.expander("📥 工具返回", expanded=True):
+                try:
+                    import json as _json
+                    parsed = _json.loads(output) if isinstance(output, str) else output
+                    st.code(_json.dumps(parsed, ensure_ascii=False, indent=2), language="json")
+                except Exception:
+                    st.text(str(output))
+
+        elif etype == "llm_error":
+            st.error(f"❌ LLM 报错：{ev.get('error', '未知错误')}")
 
 
 def _render_json_or_text(value: Any, max_chars: int = 500) -> None:

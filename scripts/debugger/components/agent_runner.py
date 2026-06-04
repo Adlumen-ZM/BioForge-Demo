@@ -61,6 +61,131 @@ for p in [str(_ROOT), str(_SCRIPTS_DIR)]:
 
 
 # ─────────────────────────────────────────────
+# LLM Trace 回调处理器
+# ─────────────────────────────────────────────
+
+try:
+    from langchain_core.callbacks import BaseCallbackHandler as _BaseCallbackHandler
+    _HAS_LANGCHAIN = True
+except ImportError:
+    _HAS_LANGCHAIN = False
+    _BaseCallbackHandler = object  # fallback，不会触发任何 LangChain 事件
+
+
+class _UITracer(_BaseCallbackHandler):
+    """LangChain 回调处理器：把 LLM/工具调用事件实时写入 progress_queue。
+
+    通过 var_child_runnable_config 注入为 ambient 回调（不修改 agent_template/）。
+    create_react_agent.invoke() 调用时自动继承此回调，捕获：
+      - llm_start  : LLM 被调用（含输入 prompt 摘要）
+      - llm_end    : LLM 回答完成（含输出文本）
+      - tool_call  : 工具被调用（含工具名 + 入参）
+      - tool_result: 工具返回结果（含输出）
+      - llm_error  : LLM 报错
+
+    放入 progress_queue 的事件格式：
+      {"event_type": "llm_start",   "step_id": "step_01", "content": "...", "model": "..."}
+      {"event_type": "llm_end",     "step_id": "step_01", "content": "..."}
+      {"event_type": "tool_call",   "step_id": "step_01", "tool": "mock_success", "input": "..."}
+      {"event_type": "tool_result", "step_id": "step_01", "output": "..."}
+      {"event_type": "llm_error",   "step_id": "step_01", "error": "..."}
+    """
+
+    _MAX_LEN = 2000  # 截断长度，防止 UI overflow
+
+    def __init__(self, progress_q: queue.Queue, step_id_ref: list) -> None:
+        """
+        Args:
+            progress_q: Streamlit 进度队列（与 StreamlitProgressBackend 共享同一 Queue）。
+            step_id_ref: 长度为1的列表 [current_step_id]，
+                         由 _StepTracker backend 在 step_start/step_end 时更新。
+        """
+        if _HAS_LANGCHAIN:
+            super().__init__()
+        self._q = progress_q
+        self._ref = step_id_ref  # mutable reference
+
+    # ── 内部工具 ───────────────────────────────────────────────────────────
+
+    def _put(self, event: dict) -> None:
+        """Safe enqueue，Queue 满时静默丢弃（避免阻塞后台线程）。"""
+        event["step_id"] = self._ref[0]
+        try:
+            self._q.put_nowait(event)
+        except queue.Full:
+            pass
+
+    @staticmethod
+    def _norm(content) -> str:
+        """归一化 LangChain content（str | list[dict]）→ str。"""
+        if isinstance(content, list):
+            return "\n".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in content
+            )
+        return str(content) if content is not None else ""
+
+    # ── LangChain 回调方法 ─────────────────────────────────────────────────
+
+    def on_llm_start(self, serialized: dict, prompts: list, **kwargs) -> None:
+        """非 chat 模型 / 兼容路径：prompts 已经是字符串列表。"""
+        # 取最后一个 prompt（通常是当前轮次的用户消息）
+        content = prompts[-1] if prompts else ""
+        model = (serialized.get("kwargs") or {}).get("model", "")
+        self._put({
+            "event_type": "llm_start",
+            "content": str(content)[: self._MAX_LEN],
+            "model": model,
+        })
+
+    def on_chat_model_start(self, serialized: dict, messages: list, **kwargs) -> None:
+        """Chat 模型路径：messages 是 List[List[BaseMessage]]。"""
+        flat = [m for row in messages for m in row]
+        # 取最后一条 human/user 消息作为输入摘要
+        human = [m for m in flat if getattr(m, "type", "") in ("human", "user")]
+        src = human[-1] if human else (flat[-1] if flat else None)
+        content = self._norm(src.content) if src else ""
+        model = (serialized.get("kwargs") or {}).get("model", "")
+        self._put({
+            "event_type": "llm_start",
+            "content": content[: self._MAX_LEN],
+            "model": model,
+        })
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        """LLM 回答完成，提取输出文本。"""
+        try:
+            text = ""
+            if response.generations and response.generations[0]:
+                gen = response.generations[0][0]
+                if hasattr(gen, "message") and hasattr(gen.message, "content"):
+                    text = self._norm(gen.message.content)
+                elif hasattr(gen, "text"):
+                    text = str(gen.text)
+            self._put({"event_type": "llm_end", "content": text[: self._MAX_LEN]})
+        except Exception as exc:
+            self._put({"event_type": "llm_end", "content": f"[解析失败: {exc}]"})
+
+    def on_tool_start(self, serialized: dict, input_str: str, **kwargs) -> None:
+        """工具被调用。"""
+        self._put({
+            "event_type": "tool_call",
+            "tool": serialized.get("name", "?"),
+            "input": str(input_str)[: self._MAX_LEN],
+        })
+
+    def on_tool_end(self, output, **kwargs) -> None:
+        """工具返回结果。"""
+        # output 可能是 ToolMessage 对象或字符串
+        out_str = self._norm(output.content) if hasattr(output, "content") else str(output)
+        self._put({"event_type": "tool_result", "output": out_str[: self._MAX_LEN]})
+
+    def on_llm_error(self, error, **kwargs) -> None:
+        """LLM 报错。"""
+        self._put({"event_type": "llm_error", "error": str(error)[: self._MAX_LEN]})
+
+
+# ─────────────────────────────────────────────
 # Agent 工厂函数路径表
 # ─────────────────────────────────────────────
 
@@ -260,14 +385,53 @@ class AgentRunner:
                 pass
 
             try:
-                agent = self._create_agent(agent_name, overrides)
-                self._attach_backend(agent, progress_queue)
+                # ── LLM Trace 回调注入 ─────────────────────────────────────
+                # 用长度为1的列表作为 mutable reference，跟踪当前执行的 step_id
+                step_id_ref: list[str | None] = [None]
+                tracer = _UITracer(progress_queue, step_id_ref)
 
-                # 运行 agent（阻塞，直到 plan 完成）
-                result = agent.run(
-                    run_id=resolved_run_id,
-                    pipeline_state=input_data or {},
-                )
+                # ── 创建 Agent ────────────────────────────────────────────
+                agent = self._create_agent(agent_name, overrides)
+
+                # ── 配置 Trace Backend（含步骤跟踪器）───────────────────
+                from components.streamlit_backend import CompositeBackend, StreamlitProgressBackend
+
+                # 用于同步更新 step_id_ref 的轻量 backend（duck-typed，无继承）
+                class _StepTracker:
+                    """在事件写入时更新 step_id_ref，使 _UITracer 知道当前 step。"""
+                    def write(self, event) -> None:
+                        if getattr(event, "step_id", None):
+                            step_id_ref[0] = event.step_id
+
+                backends: list = [
+                    _StepTracker(),
+                    StreamlitProgressBackend(progress_queue),
+                ]
+
+                # 若有 DB 则同时写库
+                if os.getenv("TRACE_DB_URL"):
+                    try:
+                        from backend.src.db_access.trace.postgres_backend import PostgresBackend
+                        backends.insert(0, PostgresBackend())
+                    except Exception as db_err:
+                        print(f"[AgentRunner] ⚠️ PostgresBackend 初始化失败：{db_err}")
+
+                agent.hook.backend = CompositeBackend(*backends)
+
+                # ── 注入 LangChain ambient 回调（不修改 agent_template）──
+                # var_child_runnable_config 是 LangChain 的 ContextVar，
+                # 在当前线程设置后，所有 Runnable.invoke() 调用都会继承此 callbacks
+                from langchain_core.runnables.config import var_child_runnable_config
+                lc_token = var_child_runnable_config.set({"callbacks": [tracer]})
+
+                try:
+                    # 运行 agent（阻塞，直到 plan 完成）
+                    result = agent.run(
+                        run_id=resolved_run_id,
+                        pipeline_state=input_data or {},
+                    )
+                finally:
+                    var_child_runnable_config.reset(lc_token)
 
                 # 运行完成，发 done 消息给 Streamlit 主线程
                 progress_queue.put({
