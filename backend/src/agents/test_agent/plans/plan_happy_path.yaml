@@ -1,0 +1,58 @@
+# test_agent/plans/plan_happy_path.yaml
+# 场景：全正常路径（Happy Path）
+# 目标：验证 plan_runner 能完整执行 3 个 step，每步成功，最终 status=success。
+# 覆盖：基本 step 循环 / context 传递 / NullBackend trace 记录 / output_adapter 输出
+
+plan_id: "test_happy_path_v01"
+agent_name: "test_agent"
+version: "1.0"
+
+steps:
+  - step_id: "step_01_basic"
+    name: "基础成功步骤"
+    instruction: |
+      调用 mock_success 工具获取默认输出。
+      输出 JSON 格式：{"result": "ok", "value": 42}
+    tools_required:
+      - "mock_success"
+    success_criteria:
+      required_fields:
+        - "result"
+      min_count: {}
+    max_retries: 1
+    db_write_policy: "none"
+
+  - step_id: "step_02_with_ids"
+    name: "含 ID 列表的成功步骤"
+    instruction: |
+      调用 mock_success 工具，使用 output_template="with_ids" 参数获取 ID 列表格式输出。
+      输出 JSON 格式：{"candidate_ids": ["P001","P002","P003"], "total": 3}
+    tools_required:
+      - "mock_success"
+    success_criteria:
+      required_fields:
+        - "candidate_ids"
+      min_count:
+        candidate_ids: 1
+    max_retries: 1
+    db_write_policy: "none"
+
+  - step_id: "step_03_summary"
+    name: "统计汇总步骤"
+    instruction: |
+      调用 mock_success 工具，使用 output_template="with_counts" 参数获取统计格式输出。
+      综合前两步的结果生成最终摘要。
+      输出 JSON 格式：
+      {
+        "test_result": "success",
+        "steps_executed": 3,
+        "framework_behaviors_verified": ["basic_step_execution", "context_passing", "output_format"]
+      }
+    tools_required:
+      - "mock_success"
+    success_criteria:
+      required_fields:
+        - "test_result"
+      min_count: {}
+    max_retries: 1
+    db_write_policy: "none"

@@ -1,0 +1,86 @@
+# test_agent/plans/plan_full_coverage.yaml
+# 场景：串联所有框架分支（Full Coverage）
+# 目标：一次 run 覆盖 success / retry / slow / rich_output 四种场景，
+#       同时验证 step 间上下文传递（每步可见前步摘要）。
+# 覆盖：基础执行 / retry恢复 / 耗时监控 / 复杂输出解析 / 多步 context 传递
+#
+# 注意：此 plan 包含 mock_slow（2s 延迟），整体运行时间约 5-8s。
+#       若测试追求速度，请使用 plan_happy_path.yaml。
+
+plan_id: "test_full_coverage_v01"
+agent_name: "test_agent"
+version: "1.0"
+
+steps:
+  - step_id: "step_01_success"
+    name: "正常执行步骤（验证基础流程）"
+    instruction: |
+      调用 mock_success 工具，output_template="with_ids"，获取 ID 列表格式输出。
+      验证点：基础 step 执行和 success_criteria.min_count 检查。
+      输出 JSON 格式：{"candidate_ids": ["P001","P002","P003"], "total": 3}
+    tools_required:
+      - "mock_success"
+    success_criteria:
+      required_fields:
+        - "candidate_ids"
+      min_count:
+        candidate_ids: 1
+    max_retries: 1
+    db_write_policy: "none"
+
+  - step_id: "step_02_flaky_retry"
+    name: "不稳定步骤（验证 retry 路径）"
+    instruction: |
+      调用 mock_flaky 工具，参数 fail_count=1、call_id="full_coverage_step02"。
+      该工具第 1 次调用失败，第 2 次成功，验证 replanner retry 决策。
+      成功时输出：{"status": "success", "result": "重试成功", "call_count": 2}
+    tools_required:
+      - "mock_flaky"
+    success_criteria:
+      required_fields:
+        - "status"
+      min_count: {}
+    max_retries: 2
+    db_write_policy: "none"
+
+  - step_id: "step_03_slow"
+    name: "耗时步骤（验证 duration_ms 计量）"
+    instruction: |
+      调用 mock_slow 工具，delay_seconds=1.5（缩短以加快测试），output_template="with_counts"。
+      验证点：trace 里的 duration_ms 应 ≥ 1500ms。
+      输出 JSON 格式：{"count": 10, "processed": 10, "skipped": 0, "elapsed_seconds": 1.5}
+    tools_required:
+      - "mock_slow"
+    success_criteria:
+      required_fields:
+        - "count"
+      min_count: {}
+    max_retries: 1
+    db_write_policy: "none"
+
+  - step_id: "step_04_rich_output"
+    name: "复杂输出步骤（验证 output_adapter 健壮性）"
+    instruction: |
+      调用 mock_rich_output 工具，获取 3 层嵌套的复杂 dict 输出。
+      验证点：output_adapter 和 context_builder 对复杂嵌套数据的处理不崩溃。
+      综合前三步的上下文，生成最终测试汇总。
+      输出 JSON 格式：
+      {
+        "test_result": "success",
+        "steps_executed": 5,
+        "framework_behaviors_verified": [
+          "basic_execution",
+          "retry_on_failure",
+          "duration_tracking",
+          "rich_output_parsing",
+          "multi_step_context"
+        ]
+      }
+    tools_required:
+      - "mock_rich_output"
+    success_criteria:
+      required_fields:
+        - "result"
+      min_count: {}
+    max_retries: 1
+    db_write_policy: "none"

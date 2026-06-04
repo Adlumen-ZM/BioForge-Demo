@@ -29,6 +29,22 @@ from typing import Any
 
 from langchain_core.tools import tool
 
+# ─────────────────────────────────────────────
+# test_agent 专属 mock tools（懒加载，避免循环依赖）
+# 物理隔离在 tools/test_agent/，禁止出现在业务 agent 的 plan.yaml 中。
+# ─────────────────────────────────────────────
+try:
+    from backend.src.tools.test_agent.mock_success import mock_success
+    from backend.src.tools.test_agent.mock_fail import mock_fail
+    from backend.src.tools.test_agent.mock_slow import mock_slow
+    from backend.src.tools.test_agent.mock_flaky import mock_flaky
+    from backend.src.tools.test_agent.mock_rich_output import mock_rich_output
+    _TEST_TOOLS_LOADED = True
+except ImportError:
+    # 单元测试环境若缺少依赖，mock tools 跳过注册不报错
+    _TEST_TOOLS_LOADED = False
+    mock_success = mock_fail = mock_slow = mock_flaky = mock_rich_output = None  # type: ignore
+
 
 # ─────────────────────────────────────────────
 # Stub Tools（v0.1 mock，不发真实网络请求）
@@ -89,9 +105,20 @@ def screen_paper(paper_id: str, criteria: str) -> dict[str, Any]:
 # ─────────────────────────────────────────────
 
 _REGISTRY: dict[str, Any] = {
+    # ── 业务 agent tools（stub，真实实现由 tools 负责人替换）──
     "pubmed_search": pubmed_search,
     "screen_paper": screen_paper,
 }
+
+# ── test_agent 专属 mock tools（若加载成功则注册）──
+if _TEST_TOOLS_LOADED:
+    _REGISTRY.update({
+        "mock_success":     mock_success,      # 永远成功，输出可配置
+        "mock_fail":        mock_fail,         # 永远失败，测 abort 路径
+        "mock_slow":        mock_slow,         # 模拟耗时，测 duration 监控
+        "mock_flaky":       mock_flaky,        # 前N次失败→成功，测 retry 逻辑
+        "mock_rich_output": mock_rich_output,  # 复杂嵌套输出，测 output_adapter 健壮性
+    })
 
 
 def get_tools(names: list[str]) -> list:

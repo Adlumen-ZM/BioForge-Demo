@@ -1,0 +1,59 @@
+# test_agent/plans/plan_abort_scenario.yaml
+# 场景：持续失败 → 超过重试上限 → Abort（中止场景）
+# 目标：验证 replanner 在 retry 次数耗尽后选择 abort，plan 整体 status=failed。
+# 覆盖：mock_fail 永远失败 / replanner.decide 选择 abort / AgentRunResult.status=failed
+#
+# 关键设计：
+#   step_02 使用 mock_fail（永远失败），max_retries=2
+#   → 第1次失败 → retry → 第2次失败 → retry → 第3次失败 → retry 超限 → abort
+#   → plan 整体状态 = "failed"，step_03 不会被执行
+
+plan_id: "test_abort_scenario_v01"
+agent_name: "test_agent"
+version: "1.0"
+
+steps:
+  - step_id: "step_01_normal"
+    name: "前置正常步骤"
+    instruction: |
+      调用 mock_success 工具获取默认输出，验证前置步骤正常运行。
+      输出 JSON 格式：{"result": "ok", "value": 42}
+    tools_required:
+      - "mock_success"
+    success_criteria:
+      required_fields:
+        - "result"
+      min_count: {}
+    max_retries: 1
+    db_write_policy: "none"
+
+  - step_id: "step_02_always_fail"
+    name: "持续失败步骤（测试 abort 路径）"
+    instruction: |
+      调用 mock_fail 工具，该工具永远返回失败状态。
+      此 step 设计为永远失败，用于测试 replanner 的 abort 决策。
+      预期：重试 2 次后触发 abort，plan 整体标记为 failed。
+      尝试输出：mock_fail(error_message="abort 场景测试：永久性失败")
+    tools_required:
+      - "mock_fail"
+    success_criteria:
+      required_fields:
+        - "nonexistent_field_to_force_failure"
+      min_count: {}
+    max_retries: 2
+    db_write_policy: "none"
+
+  - step_id: "step_03_unreachable"
+    name: "不可达步骤（abort 后不应执行）"
+    instruction: |
+      此步骤在 abort 场景下永远不会被执行。
+      若此 step 出现在 trace 中，说明 abort 逻辑存在 bug。
+      调用 mock_success 工具。
+    tools_required:
+      - "mock_success"
+    success_criteria:
+      required_fields:
+        - "result"
+      min_count: {}
+    max_retries: 1
+    db_write_policy: "none"

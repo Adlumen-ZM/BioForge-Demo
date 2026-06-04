@@ -38,3 +38,6 @@ langsmith>=0.1.4
 numpy>=1.20.0
 # 第一次构建失败, 因为原来的requirements.txt有了, 但是现在把他显视化维护, 后面要注意拉更清晰的表单
 biopython>=1.84
+
+# ==================== 算子调优工具（scripts/debugger/ Streamlit UI） ====================
+streamlit>=1.35.0

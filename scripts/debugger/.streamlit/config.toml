@@ -1,0 +1,19 @@
+# scripts/debugger/.streamlit/config.toml
+# BioForge Debugger — Streamlit 深色主题配置
+# 启动：cd scripts/debugger && streamlit run app.py
+
+[theme]
+base = "dark"
+primaryColor = "#00D4AA"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1A1F2E"
+textColor = "#FAFAFA"
+font = "monospace"
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
+
+[browser]
+gatherUsageStats = false

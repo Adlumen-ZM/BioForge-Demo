@@ -1,0 +1,69 @@
+# test_agent/plans/plan_retry_scenario.yaml
+# 场景：失败 → 重试 → 最终成功（Retry Scenario）
+# 目标：验证 replanner 在 step 失败时触发 retry，且在允许的重试次数内能成功恢复。
+# 覆盖：validator 检测失败 / replanner.decide 选择 retry / retry 后成功 / trace 记录重试过程
+#
+# 关键设计：
+#   step_02 使用 mock_flaky(fail_count=1, call_id="step_02_retry")
+#   → 第1次调用失败（触发 retry）
+#   → 第2次调用成功（max_retries=2，有足够容量）
+#   → 最终 plan 整体 status=success
+
+plan_id: "test_retry_scenario_v01"
+agent_name: "test_agent"
+version: "1.0"
+
+steps:
+  - step_id: "step_01_normal"
+    name: "前置正常步骤"
+    instruction: |
+      调用 mock_success 工具获取默认输出，作为前置步骤验证上下文传递正常。
+      输出 JSON 格式：{"result": "ok", "value": 42}
+    tools_required:
+      - "mock_success"
+    success_criteria:
+      required_fields:
+        - "result"
+      min_count: {}
+    max_retries: 1
+    db_write_policy: "none"
+
+  - step_id: "step_02_flaky"
+    name: "不稳定步骤（第1次失败，重试后成功）"
+    instruction: |
+      调用 mock_flaky 工具，参数 fail_count=1、call_id="step_02_retry"。
+      该工具第 1 次调用会失败，第 2 次调用（即 retry 后）会成功。
+      成功时输出 JSON 格式：
+      {
+        "status": "success",
+        "result": "第2次调用终于成功",
+        "call_count": 2,
+        "call_id": "step_02_retry"
+      }
+    tools_required:
+      - "mock_flaky"
+    success_criteria:
+      required_fields:
+        - "status"
+      min_count: {}
+    max_retries: 2
+    db_write_policy: "none"
+
+  - step_id: "step_03_verify"
+    name: "验证重试后的状态汇总"
+    instruction: |
+      调用 mock_success 工具，确认前序 retry 流程完整，生成最终汇总。
+      输出 JSON 格式：
+      {
+        "test_result": "success",
+        "steps_executed": 4,
+        "framework_behaviors_verified": ["retry_on_failure", "replanner_retry_decision", "recovery_after_retry"]
+      }
+    tools_required:
+      - "mock_success"
+    success_criteria:
+      required_fields:
+        - "test_result"
+      min_count: {}
+    max_retries: 1
+    db_write_policy: "none"
