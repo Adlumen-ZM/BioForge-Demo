@@ -187,7 +187,7 @@ st.markdown("---")
 
 # ── 快捷运行区域（在主页也提供一键运行入口）
 st.markdown("### ⚡ 快捷运行（test_agent）")
-st.caption("无需前往编辑器页面，直接在此选择 plan 并运行。结果可在"运行详情"页查看。")
+st.caption("无需前往编辑器页面，直接在此选择 plan 并运行。结果可在「运行详情」页查看。")
 
 quick_col1, quick_col2, quick_col3 = st.columns([2, 2, 1])
 

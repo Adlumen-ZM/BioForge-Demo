@@ -155,16 +155,15 @@ with st.expander("⚙️ 运行配置", expanded=False):
         st.markdown(f"**agent_run_id：** `{agent_run_id}`")
         st.markdown(f"**run_id：** `{run_id}`")
     with cfg_col2:
-        # 从 plan_start 事件提取 extra 字段
-        extra = (plan_start or {}).get("extra") or {}
-        model = extra.get("model", "—")
-        plan  = extra.get("plan_name", extra.get("plan_path", "—"))
-        st.markdown(f"**模型：** `{model}`")
-        st.markdown(f"**Plan：** `{plan}`")
-
-    if extra:
-        st.markdown("**完整 extra 字段：**")
-        st.json(extra)
+        # plan_start payload 含 plan_id / total_steps / step_ids（不含 model，model 在 config 层）
+        ps_payload = (plan_start or {}).get("payload") or {}
+        plan_id    = ps_payload.get("plan_id", "—")
+        total_steps = ps_payload.get("total_steps", "—")
+        step_ids   = ps_payload.get("step_ids", [])
+        st.markdown(f"**Plan ID：** `{plan_id}`")
+        st.markdown(f"**总 Step 数：** {total_steps}")
+        if step_ids:
+            st.caption("Steps：" + " → ".join(step_ids))
 
 
 # ─────────────────────────────────────────────

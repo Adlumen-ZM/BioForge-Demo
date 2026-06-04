@@ -145,18 +145,21 @@ for rid in active_ids:
         plan_start = next((e for e in events if e.get("event_type") == "plan_start"), {})
         step_events = [e for e in events if e.get("event_type") == "step_end"]
 
-        extra = (plan_start or {}).get("extra") or {}
+        # plan_start.payload 含 plan_id / plan_version / total_steps / step_ids
+        ps_payload = (plan_start or {}).get("payload") or {}
+        # plan_end.payload 含 model（若有）
+        pe_payload = (plan_end or {}).get("payload") or {}
         run_data[rid] = {
             "events":      events,
             "summary":     summary,
             "plan_end":    plan_end,
             "plan_start":  plan_start,
             "step_events": step_events,
-            "stage":       (plan_end or {}).get("stage", "—"),
+            "stage":       (plan_end or plan_start or {}).get("stage", "—"),
             "status":      (plan_end or {}).get("status", "—"),
             "duration_ms": (plan_end or {}).get("duration_ms"),
-            "model":       extra.get("model", "—"),
-            "plan":        extra.get("plan_name", extra.get("plan_path", "—")),
+            "model":       pe_payload.get("model", ps_payload.get("model", "—")),
+            "plan":        ps_payload.get("plan_id", "—"),
             "total_events": len(events),
             "step_count":  len(step_events),
         }
@@ -275,10 +278,12 @@ else:
                 if step_ev is None:
                     st.caption("（无记录）")
                 else:
-                    s   = step_ev.get("status", "—")
-                    dur = step_ev.get("duration_ms")
-                    rc  = step_ev.get("retry_count", 0) or 0
-                    tool = step_ev.get("tool", "—")
+                    s       = step_ev.get("status", "—")
+                    dur     = step_ev.get("duration_ms")
+                    payload = step_ev.get("payload") or {}
+                    rc      = int(payload.get("retry_count") or 0)
+                    tools   = payload.get("tools_required") or []
+                    tool    = ", ".join(tools) if tools else "—"
 
                     badge = render_status_badge(s)
                     st.markdown(badge, unsafe_allow_html=True)
@@ -316,8 +321,8 @@ if len(active_ids) == 2:
         summary_lines.append(f"- 两次运行均执行了 **{sc_a}** 个 step")
 
     # 重试次数
-    retry_a = sum((s.get("retry_count") or 0) for s in da["step_events"])
-    retry_b = sum((s.get("retry_count") or 0) for s in db["step_events"])
+    retry_a = sum(int((s.get("payload") or {}).get("retry_count") or 0) for s in da["step_events"])
+    retry_b = sum(int((s.get("payload") or {}).get("retry_count") or 0) for s in db["step_events"])
     if retry_a == 0 and retry_b == 0:
         summary_lines.append("- 两次运行均**无重试**")
     elif retry_a == 0 and retry_b > 0:

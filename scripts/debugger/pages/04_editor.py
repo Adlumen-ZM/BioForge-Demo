@@ -127,7 +127,13 @@ def _update_steps_state(steps_state: dict[str, Any], event: dict[str, Any]) -> N
     if etype == "step_start":
         steps_state[step_id] = {**event, "status": "running"}
     elif etype == "step_end":
-        steps_state[step_id] = event
+        # 合并 step_start 的 payload（含 tools_required）到 step_end 数据
+        existing = steps_state.get(step_id, {})
+        start_payload = existing.get("payload") or {}
+        end_payload = event.get("payload") or {}
+        # step_end payload 优先，但保留 step_start 独有的字段（如 tools_required）
+        merged_payload = {**start_payload, **end_payload}
+        steps_state[step_id] = {**existing, **event, "payload": merged_payload}
 
 
 def _render_streaming_view(steps_state: dict[str, Any]) -> None:

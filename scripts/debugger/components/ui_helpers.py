@@ -124,39 +124,60 @@ def render_status_badge(status: str) -> str:
 def render_step_card(step_data: dict[str, Any], expanded: bool = True) -> None:
     """渲染单个 step 的详情卡片（st.expander 包裹）。
 
-    展示信息：
-      - 标题：step_id + 状态徽章 + 耗时
-      - 工具名称
-      - 输入摘要（tool_input 前 300 字符）
-      - 输出摘要（tool_output 前 500 字符）
-      - 重试次数（retry_count > 0 时显示警告）
-      - 错误信息（status=="failed" 时显示）
+    TraceEvent.to_dict() 的实际结构：
+      {
+        "step_id": "step_01_basic",
+        "status": "success" | "failed" | "running",
+        "duration_ms": 21000.0,
+        "event_type": "step_end",
+        "payload": {
+            "step_name": "基础成功步骤",
+            "retry_count": 0,
+            "error_message": None | "...",
+            "output_keys": ["result", "value", ...],   # 只有 key，无 value
+            "summary": {
+                "what_was_done": "...",
+                "what_was_produced": "...",
+                "key_numbers": {...},
+                "issues_encountered": "..."
+            },
+            # 以下来自 step_start payload（合并后才有）：
+            "tools_required": ["mock_success"],
+            "step_name": "...",
+            "max_retries": 1,
+        }
+      }
 
     Args:
-        step_data: 包含 step_end 事件字段的 dict。
-                   期望键：step_id / tool / tool_input / tool_output /
-                           status / duration_ms / retry_count / error
+        step_data: TraceEvent.to_dict() 输出（step_start + step_end 合并后的 dict）。
         expanded: expander 默认是否展开（默认 True）。
     """
-    step_id    = step_data.get("step_id", "unknown_step")
-    status     = step_data.get("status", "unknown")
-    duration   = step_data.get("duration_ms")
-    tool       = step_data.get("tool", "—")
-    retry_cnt  = step_data.get("retry_count", 0) or 0
-    error_msg  = step_data.get("error")
+    step_id   = step_data.get("step_id", "unknown_step")
+    status    = step_data.get("status", "unknown")
+    duration  = step_data.get("duration_ms")
 
-    # expander 标题：step_id + 状态图标 + 耗时
+    # payload 是嵌套 dict，所有 step 级信息在此
+    payload   = step_data.get("payload") or {}
+    step_name = payload.get("step_name", step_id)
+    retry_cnt = int(payload.get("retry_count") or 0)
+    error_msg = payload.get("error_message")
+    out_keys  = payload.get("output_keys") or []
+    summary   = payload.get("summary") or {}
+    tools     = payload.get("tools_required") or []
+    tool_str  = ", ".join(tools) if tools else "—"
+
     icon    = STATUS_ICONS.get(status, STATUS_ICONS["unknown"])
     dur_str = format_ms(duration)
-    title   = f"{icon} {step_id}  ·  {dur_str}"
+    title   = f"{icon} {step_id}  ·  {step_name}  ·  {dur_str}"
 
     with st.expander(title, expanded=expanded):
+
         # ── 顶部状态行
         col_badge, col_tool, col_dur = st.columns([2, 3, 2])
         with col_badge:
             st.markdown(render_status_badge(status), unsafe_allow_html=True)
         with col_tool:
-            st.markdown(f"**🔧 工具：** `{tool}`")
+            st.markdown(f"**🔧 工具：** `{tool_str}`")
         with col_dur:
             st.markdown(f"**⏱ 耗时：** {dur_str}")
 
@@ -166,29 +187,35 @@ def render_step_card(step_data: dict[str, Any], expanded: bool = True) -> None:
 
         st.divider()
 
-        # ── 输入 / 输出并排
-        col_in, col_out = st.columns(2)
+        # ── 执行摘要（来自 summary.what_was_done / what_was_produced）
+        col_done, col_produced = st.columns(2)
 
-        tool_input = step_data.get("tool_input")
-        with col_in:
-            st.markdown("**📥 输入**")
-            if tool_input:
-                _render_json_or_text(tool_input, max_chars=300)
-            else:
-                st.caption("（无输入）")
+        with col_done:
+            st.markdown("**🎯 执行了什么**")
+            what_done = summary.get("what_was_done") or "—"
+            st.caption(what_done)
 
-        tool_output = step_data.get("tool_output")
-        with col_out:
-            st.markdown("**📤 输出**")
-            if tool_output:
-                _render_json_or_text(tool_output, max_chars=500)
-            else:
-                st.caption("（无输出）")
+        with col_produced:
+            st.markdown("**📦 产出内容**")
+            what_produced = summary.get("what_was_produced") or "—"
+            st.caption(what_produced)
+            if out_keys:
+                st.caption(f"输出字段：`{'`, `'.join(out_keys)}`")
+
+        # ── key_numbers（可量化数字摘要）
+        key_nums = summary.get("key_numbers") or {}
+        if key_nums:
+            st.divider()
+            st.markdown("**📊 关键数字**")
+            kn_cols = st.columns(min(len(key_nums), 4))
+            for col, (k, v) in zip(kn_cols, key_nums.items()):
+                col.metric(k, v)
 
         # ── 错误信息
-        if status == "failed" and error_msg:
+        issues = summary.get("issues_encountered") or error_msg
+        if status == "failed" and issues:
             st.divider()
-            st.error(f"❌ 错误：{error_msg}")
+            st.error(f"❌ 错误：{issues}")
 
 
 def _render_json_or_text(value: Any, max_chars: int = 500) -> None:
