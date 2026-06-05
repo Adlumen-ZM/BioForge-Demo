@@ -1,0 +1,176 @@
+# test_agent/plans/plan_deep_analysis.yaml
+# 场景：深度文献分析（Deep Analysis）
+# 目标：验证两项高级框架能力：
+#   1. Step 内多轮 ReAct 轮询（LLM 自主决策继续调用工具）
+#   2. Plan 级 validate_plan 失败（所有 step 成功，但最终输出不满足 output_contract）
+#
+# 设计说明：
+#   Step 1 —— mock_literature_search 支持分页：首次返回 has_more=true + session_id，
+#             LLM 看到 has_more=true 后会自然再次调用。instruction 不提"轮询"。
+#             预期 LLM 工具调用次数：3 次（3批 × 1次/批）。
+#
+#   Step 2 —— mock_fetch_details 是异步任务：首次调用返回 job_id + status=submitted，
+#             后续返回 status=processing，再后返回 status=complete。
+#             LLM 看到非 complete 状态会自然继续轮询。instruction 不提"轮询次数"。
+#             预期 LLM 工具调用次数：3 次（submit + poll + complete）。
+#
+#   Step 3 —— mock_binding_analysis 单次调用返回复杂嵌套结构，
+#             测试 output_adapter 对富输出的处理，预期 1 次工具调用。
+#
+#   Step 4 —— mock_generate_report 单次调用，step 本身 validate_step 通过，
+#             但其输出不含 output_contract 要求的 test_result / steps_executed /
+#             framework_behaviors_verified，触发 validate_plan 失败。
+#             最终 plan 状态：step 全部 ✅，plan 整体 ❌（validate_plan = no）。
+#
+# 预期在调试平台（02_detail）看到：
+#   - Step 1：3条 LLM 思考链（含3次工具调用），status=success
+#   - Step 2：3条 LLM 思考链（含3次工具调用），status=success
+#   - Step 3：1条 LLM 思考链（含1次工具调用），status=success，输出极丰富
+#   - Step 4：1条 LLM 思考链，status=success
+#   - Plan 整体：status=failed（validate_plan LLM 指出缺少 test_result 等字段）
+
+plan_id: "test_deep_analysis_v01"
+agent_name: "test_agent"
+version: "1.0"
+
+steps:
+  # ─────────────────────────────────────────────────────────
+  # Step 1：分页文献检索（期望3轮 LLM → 工具调用）
+  # ─────────────────────────────────────────────────────────
+  - step_id: "step_01_search"
+    name: "分页检索 HAp 结合肽文献"
+    instruction: |
+      使用 mock_literature_search 工具检索肽段与羟基磷灰石（HAp）结合相互作用的文献。
+
+      检索要求：
+      - 检索关键词可以是 "hydroxyapatite binding peptide" 或类似描述
+      - 必须获取全部文献，不能只拿第一批就停止
+      - 每次调用后检查 has_more 字段：若为 true，需继续调用以获取剩余批次
+      - 后续调用时必须传入上次返回的 search_session_id 参数
+      - 当 has_more 为 false 且 search_complete 为 true 时，检索完成
+
+      最终输出（JSON 格式）：
+      {
+        "total_papers_found": <实际获取到的论文总数>,
+        "all_pmids": <所有论文 PMID 的列表>,
+        "search_session_id": <本次检索的 session_id>,
+        "batches_retrieved": <共检索了几批>
+      }
+    tools_required:
+      - "mock_literature_search"
+    success_criteria:
+      required_fields:
+        - "total_papers_found"
+        - "all_pmids"
+      min_count:
+        all_pmids: 10
+    max_retries: 1
+    db_write_policy: "none"
+
+  # ─────────────────────────────────────────────────────────
+  # Step 2：异步获取论文详情（期望3轮 LLM → 工具调用）
+  # ─────────────────────────────────────────────────────────
+  - step_id: "step_02_fetch"
+    name: "异步获取论文详情（摘要/Kd/实验方法）"
+    instruction: |
+      使用 mock_fetch_details 工具批量获取上一步检索到的论文详细信息。
+
+      该工具为异步执行，使用方法如下：
+      - 首次调用：传入论文 PMID 列表，工具返回 job_id 和 status="submitted"
+      - 后续调用：传入同一个 job_id（pmids 可省略），查询任务进度
+      - 当返回 status="complete" 时，结果中包含完整的论文详情
+
+      注意：提交任务后服务器需要时间处理，status 不会立即变为 complete，
+      需要持续查询直到任务完成。
+
+      最终输出（JSON 格式）：
+      {
+        "job_id": <任务 ID>,
+        "total_papers_retrieved": <成功获取详情的论文数>,
+        "high_affinity_candidates": <Kd < 1.5 nM 的论文 PMID 列表>,
+        "mean_binding_affinity_kd_nm": <所有论文 Kd 的均值>,
+        "papers_with_details": <论文详情列表（直接来自工具返回，不需修改）>
+      }
+    tools_required:
+      - "mock_fetch_details"
+    success_criteria:
+      required_fields:
+        - "job_id"
+        - "total_papers_retrieved"
+        - "high_affinity_candidates"
+      min_count:
+        high_affinity_candidates: 2
+    max_retries: 1
+    db_write_policy: "none"
+
+  # ─────────────────────────────────────────────────────────
+  # Step 3：结合亲和力分析（单次调用，富输出）
+  # ─────────────────────────────────────────────────────────
+  - step_id: "step_03_analyze"
+    name: "肽段-HAp 结合亲和力系统分析"
+    instruction: |
+      根据前两步获取的论文数据，使用 mock_binding_analysis 工具进行系统性
+      肽段-HAp 结合亲和力分析。
+
+      可以将前一步获取到的 papers_with_details 传入 paper_details 参数。
+      focus_features 参数可选，可以传入 ["phosphorylation", "acidic_cluster"]
+      来重点分析这两类结构特征。
+
+      最终输出（JSON 格式，直接来自工具返回，不需修改）：
+      {
+        "analysis_id": <分析 ID>,
+        "papers_analyzed": <分析的论文数量>,
+        "key_binding_motifs": <关键结合基序列表>,
+        "structural_features": <关键结构特征分析>,
+        "top_candidate_peptides": <候选肽段排名列表>,
+        "binding_mechanism": <结合机制分析>,
+        "recommendations": <研究建议列表>
+      }
+    tools_required:
+      - "mock_binding_analysis"
+    success_criteria:
+      required_fields:
+        - "analysis_id"
+        - "top_candidate_peptides"
+        - "key_binding_motifs"
+      min_count:
+        top_candidate_peptides: 3
+        key_binding_motifs: 3
+    max_retries: 1
+    db_write_policy: "none"
+
+  # ─────────────────────────────────────────────────────────
+  # Step 4：生成分析报告（触发 validate_plan 失败）
+  # ─────────────────────────────────────────────────────────
+  - step_id: "step_04_report"
+    name: "生成最终分析报告"
+    instruction: |
+      使用 mock_generate_report 工具，整合前三步的分析结果，
+      生成结构化的肽段-HAp 结合亲和力综述报告。
+
+      参数说明：
+      - analysis_summary：对前序分析的简短描述（一两句话即可）
+      - candidate_count：报告中列出的候选肽段数量，设为 3
+      - include_next_steps：设为 true，包含后续实验建议
+
+      最终输出（JSON 格式）：
+      {
+        "report_id": <报告 ID>,
+        "title": <报告标题>,
+        "executive_summary": <执行摘要>,
+        "literature_coverage": <文献覆盖统计>,
+        "top_candidates_ranked": <候选肽段排名>,
+        "key_structure_rules": <关键结构规则列表>,
+        "next_steps": <后续实验计划>
+      }
+    tools_required:
+      - "mock_generate_report"
+    success_criteria:
+      required_fields:
+        - "report_id"
+        - "executive_summary"
+        - "top_candidates_ranked"
+      min_count:
+        top_candidates_ranked: 3
+    max_retries: 1
+    db_write_policy: "none"

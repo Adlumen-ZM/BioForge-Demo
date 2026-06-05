@@ -39,11 +39,17 @@ try:
     from backend.src.tools.test_agent.mock_slow import mock_slow
     from backend.src.tools.test_agent.mock_flaky import mock_flaky
     from backend.src.tools.test_agent.mock_rich_output import mock_rich_output
+    # plan_deep_analysis 专属工具（多轮轮询 + validate_plan 失败测试）
+    from backend.src.tools.test_agent.mock_literature_search import mock_literature_search
+    from backend.src.tools.test_agent.mock_fetch_details import mock_fetch_details
+    from backend.src.tools.test_agent.mock_binding_analysis import mock_binding_analysis
+    from backend.src.tools.test_agent.mock_generate_report import mock_generate_report
     _TEST_TOOLS_LOADED = True
 except ImportError:
     # 单元测试环境若缺少依赖，mock tools 跳过注册不报错
     _TEST_TOOLS_LOADED = False
     mock_success = mock_fail = mock_slow = mock_flaky = mock_rich_output = None  # type: ignore
+    mock_literature_search = mock_fetch_details = mock_binding_analysis = mock_generate_report = None  # type: ignore
 
 
 # ─────────────────────────────────────────────
@@ -118,6 +124,11 @@ if _TEST_TOOLS_LOADED:
         "mock_slow":        mock_slow,         # 模拟耗时，测 duration 监控
         "mock_flaky":       mock_flaky,        # 前N次失败→成功，测 retry 逻辑
         "mock_rich_output": mock_rich_output,  # 复杂嵌套输出，测 output_adapter 健壮性
+        # plan_deep_analysis 专属（多轮轮询 + validate_plan 失败测试）
+        "mock_literature_search": mock_literature_search,  # 分页检索，返回 has_more 信号
+        "mock_fetch_details":     mock_fetch_details,      # 异步任务，status=submitted→processing→complete
+        "mock_binding_analysis":  mock_binding_analysis,   # 单次调用，富嵌套输出
+        "mock_generate_report":   mock_generate_report,    # 生成报告，故意缺少 output_contract 字段
     })
 
 

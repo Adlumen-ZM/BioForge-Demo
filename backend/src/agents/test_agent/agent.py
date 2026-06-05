@@ -49,11 +49,13 @@ _PLAN_NAMES = {
     "retry_scenario": "plan_retry_scenario",
     "abort_scenario": "plan_abort_scenario",
     "full_coverage": "plan_full_coverage",
+    "deep_analysis": "plan_deep_analysis",
     # 支持直接传带前缀的完整名称
     "plan_happy_path": "plan_happy_path",
     "plan_retry_scenario": "plan_retry_scenario",
     "plan_abort_scenario": "plan_abort_scenario",
     "plan_full_coverage": "plan_full_coverage",
+    "plan_deep_analysis": "plan_deep_analysis",
 }
 
 # test_agent 专属的 mock tools 白名单（物理隔离，禁止真实 agent 使用）
@@ -63,6 +65,11 @@ _TEST_TOOLS = [
     "mock_slow",
     "mock_flaky",
     "mock_rich_output",
+    # plan_deep_analysis 专属（多轮轮询 + validate_plan 失败路径测试）
+    "mock_literature_search",
+    "mock_fetch_details",
+    "mock_binding_analysis",
+    "mock_generate_report",
 ]
 
 

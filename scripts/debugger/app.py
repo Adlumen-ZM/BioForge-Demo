@@ -196,6 +196,7 @@ PLAN_OPTIONS = {
     "plan_retry_scenario":  "🔁 失败→重试→成功",
     "plan_abort_scenario":  "💥 持续失败→中止",
     "plan_full_coverage":   "🧪 全分支覆盖",
+    "plan_deep_analysis":   "🔬 深度分析（多轮轮询）",
 }
 
 with quick_col1:
