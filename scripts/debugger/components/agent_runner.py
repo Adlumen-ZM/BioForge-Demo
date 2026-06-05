@@ -229,10 +229,6 @@ def _load_factory(agent_name: str):
 
 
 # ─────────────────────────────────────────────
-# AgentRunner
-# ─────────────────────────────────────────────
-
-# ─────────────────────────────────────────────
 # Langfuse 集成（可选，静默降级）
 # ─────────────────────────────────────────────
 
@@ -246,10 +242,19 @@ def _make_langfuse_handler(
     LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY 未配置时返回 None，静默跳过。
     langfuse 包未安装时打印提示并返回 None，不影响主流程。
 
+    环境变量（与 Langfuse 官方文档一致）：
+      LANGFUSE_PUBLIC_KEY  — 项目公钥（pk-lf-...）
+      LANGFUSE_SECRET_KEY  — 项目私钥（sk-lf-...）
+      LANGFUSE_BASE_URL    — 服务地址：
+                             官方云（US）：https://us.cloud.langfuse.com
+                             官方云（EU）：https://cloud.langfuse.com
+                             自建实例：    http://localhost:3000
+
     Args:
-        run_id:     当前 run 的唯一 ID，作为 Langfuse session_id 用于聚合同次运行的全部 LLM 调用。
-        agent_name: agent 标识（"test" / "search" 等），作为 trace 分组标签。
-        overrides:  AgentRunner 传入的覆盖参数，用于提取 plan_name 等附加标签。
+        run_id:     当前 run 的唯一 ID，作为 Langfuse session_id，
+                    用于在 Langfuse UI 的 Sessions 视图中聚合同次运行的全部 LLM 调用。
+        agent_name: agent 标识（"test" / "search" 等），作为 trace_name 和 tag。
+        overrides:  AgentRunner 传入的覆盖参数，用于提取 plan_name 等附加 tag。
 
     Returns:
         Langfuse CallbackHandler 实例，或 None（未配置 / 包不存在）。
@@ -259,34 +264,44 @@ def _make_langfuse_handler(
     if not public_key or not secret_key:
         return None  # 未配置，静默跳过
 
+    # langfuse 各版本的 LangChain callback import 路径
+    # v2/v3 主路径：langfuse.callback；部分构建也在 langfuse.langchain
+    CallbackHandler = None
     try:
         from langfuse.callback import CallbackHandler  # type: ignore[import]
+    except ImportError:
+        try:
+            from langfuse.langchain import CallbackHandler  # type: ignore[import]
+        except ImportError:
+            print(
+                "[AgentRunner] ⚠️ langfuse 未安装，Langfuse 追踪已跳过。"
+                "如需启用请运行：pip install 'langfuse>=2.0'"
+            )
+            return None
 
+    try:
         plan_name = (overrides or {}).get("plan_name", "")
         tags = [agent_name] + ([plan_name] if plan_name else [])
 
-        # 官方环境变量名是 LANGFUSE_BASE_URL（SDK 会自动读取）；
-        # 若用户显式配置了 LANGFUSE_BASE_URL，SDK 会优先使用，此处不再手动传 host。
-        # secret_key / public_key 也可以由 SDK 自动读取，但显式传入更明确。
+        # host 参数对应官方 LANGFUSE_BASE_URL 环境变量：
+        #   云端（US 区域）: https://us.cloud.langfuse.com
+        #   云端（EU 区域）: https://cloud.langfuse.com（默认）
+        #   自建实例:        http://localhost:3000（或其他自定义地址）
+        base_url = os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+
         return CallbackHandler(
             public_key=public_key,
             secret_key=secret_key,
-            host=os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
-            session_id=run_id,           # 同一 run 的所有 LLM 调用聚合在同一 session
-            trace_name=agent_name,       # Langfuse UI 中的 trace 名称
-            tags=tags,                   # 便于在 dashboard 按 agent / plan 过滤
+            host=base_url,
+            session_id=run_id,        # Sessions 视图：同 run 的所有 LLM 调用聚合在一起
+            trace_name=agent_name,    # Traces 视图中显示的 trace 名称
+            tags=tags,                # 按 agent / plan 在 dashboard 过滤用
             metadata={
-                "run_id":    run_id,
-                "agent":     agent_name,
-                "plan":      plan_name,
+                "run_id": run_id,
+                "agent":  agent_name,
+                "plan":   plan_name,
             },
         )
-    except ImportError:
-        print(
-            "[AgentRunner] ⚠️ langfuse 未安装，Langfuse 追踪已跳过。"
-            "如需启用请运行：pip install 'langfuse>=2.0'"
-        )
-        return None
     except Exception as exc:
         print(f"[AgentRunner] ⚠️ Langfuse 初始化失败，已跳过：{exc}")
         return None
