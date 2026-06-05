@@ -232,6 +232,63 @@ def _load_factory(agent_name: str):
 # AgentRunner
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# Langfuse 集成（可选，静默降级）
+# ─────────────────────────────────────────────
+
+def _make_langfuse_handler(
+    run_id: str,
+    agent_name: str,
+    overrides: dict[str, Any] | None = None,
+):
+    """创建 Langfuse CallbackHandler（LangChain 回调）。
+
+    LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY 未配置时返回 None，静默跳过。
+    langfuse 包未安装时打印提示并返回 None，不影响主流程。
+
+    Args:
+        run_id:     当前 run 的唯一 ID，作为 Langfuse session_id 用于聚合同次运行的全部 LLM 调用。
+        agent_name: agent 标识（"test" / "search" 等），作为 trace 分组标签。
+        overrides:  AgentRunner 传入的覆盖参数，用于提取 plan_name 等附加标签。
+
+    Returns:
+        Langfuse CallbackHandler 实例，或 None（未配置 / 包不存在）。
+    """
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+    if not public_key or not secret_key:
+        return None  # 未配置，静默跳过
+
+    try:
+        from langfuse.callback import CallbackHandler  # type: ignore[import]
+
+        plan_name = (overrides or {}).get("plan_name", "")
+        tags = [agent_name] + ([plan_name] if plan_name else [])
+
+        return CallbackHandler(
+            public_key=public_key,
+            secret_key=secret_key,
+            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            session_id=run_id,           # 同一 run 的所有 LLM 调用聚合在同一 session
+            trace_name=agent_name,       # Langfuse UI 中的 trace 名称
+            tags=tags,                   # 便于在 dashboard 按 agent / plan 过滤
+            metadata={
+                "run_id":    run_id,
+                "agent":     agent_name,
+                "plan":      plan_name,
+            },
+        )
+    except ImportError:
+        print(
+            "[AgentRunner] ⚠️ langfuse 未安装，Langfuse 追踪已跳过。"
+            "如需启用请运行：pip install 'langfuse>=2.0'"
+        )
+        return None
+    except Exception as exc:
+        print(f"[AgentRunner] ⚠️ Langfuse 初始化失败，已跳过：{exc}")
+        return None
+
+
 class AgentRunner:
     """AgentTemplate 运行封装，支持同步和流式两种模式。
 
@@ -429,9 +486,15 @@ class AgentRunner:
 
                 # ── 注入 LangChain ambient 回调（不修改 agent_template）──
                 # var_child_runnable_config 是 LangChain 的 ContextVar，
-                # 在当前线程设置后，所有 Runnable.invoke() 调用都会继承此 callbacks
+                # 在当前线程设置后，所有 Runnable.invoke() 调用都会继承此 callbacks。
+                # callbacks 列表：
+                #   [0] _UITracer        — 实时写 progress_queue，驱动 Streamlit step 卡片
+                #   [1] LangfuseHandler  — （可选）全链路追踪到 Langfuse，未配置时不加入
+                lf_handler = _make_langfuse_handler(resolved_run_id, agent_name, overrides)
+                callbacks = [tracer] + ([lf_handler] if lf_handler else [])
+
                 from langchain_core.runnables.config import var_child_runnable_config
-                lc_token = var_child_runnable_config.set({"callbacks": [tracer]})
+                lc_token = var_child_runnable_config.set({"callbacks": callbacks})
 
                 try:
                     # 运行 agent（阻塞，直到 plan 完成）
@@ -441,6 +504,12 @@ class AgentRunner:
                     )
                 finally:
                     var_child_runnable_config.reset(lc_token)
+                    # Langfuse 批量发送事件，run 结束后必须 flush 以防丢失
+                    if lf_handler:
+                        try:
+                            lf_handler.flush()
+                        except Exception as _flush_err:
+                            print(f"[AgentRunner] ⚠️ Langfuse flush 失败（已忽略）：{_flush_err}")
 
                 # 运行完成，发 done 消息给 Streamlit 主线程
                 progress_queue.put({

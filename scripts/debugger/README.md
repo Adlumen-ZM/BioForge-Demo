@@ -12,12 +12,13 @@
    - [WSL / Linux](#12-wsl--linux)
    - [原生 Mac（无 Docker）](#13-原生-mac无-docker)
 2. [.env 配置详解](#2-env-配置详解)
-3. [平台页面完整操作指南](#3-平台页面完整操作指南)
-   - [主页（快捷运行）](#31-主页快捷运行)
-   - [📋 01 运行历史](#32--01-运行历史)
-   - [🔍 02 运行详情](#33--02-运行详情)
-   - [⚡ 03 对比实验](#34--03-对比实验)
-   - [⚙️ 04 运行编辑器（核心）](#35-️-04-运行编辑器核心)
+3. [Langfuse LLM 追踪（可选）](#3-langfuse-llm-追踪可选)
+4. [平台页面完整操作指南](#4-平台页面完整操作指南)
+   - [主页（快捷运行）](#41-主页快捷运行)
+   - [📋 01 运行历史](#42--01-运行历史)
+   - [🔍 02 运行详情](#43--02-运行详情)
+   - [⚡ 03 对比实验](#44--03-对比实验)
+   - [⚙️ 04 运行编辑器（核心）](#45-️-04-运行编辑器核心)
 4. [Agent 状态说明](#4-agent-状态说明)
 5. [调整 Agent 真实配置](#5-调整-agent-真实配置)
    - [修改 Plan（步骤 / 工具 / 重试逻辑）](#51-修改-plan步骤--工具--重试逻辑)
@@ -209,13 +210,108 @@ TRACE_DB_URL=sqlite:///data/traces.db
 
 ---
 
-## 3. 平台页面完整操作指南
+## 3. Langfuse LLM 追踪（可选）
+
+Langfuse 是开源 LLM 观测平台，为 BioForge 算子调优提供比调试平台更深层的数据：
+
+| 调试平台（内置） | Langfuse（额外） |
+|-----------------|-----------------|
+| Step 级 status / 耗时 | 每次 LLM 调用完整 prompt + 输出 |
+| LLM 思考链摘要 | Token 用量（prompt / completion 分开） |
+| Tool 调用记录 | 费用估算（按模型单价） |
+| SQLite / Postgres 历史 | 跨 run 的 p50/p95 延迟分布图 |
+| — | Trace 树形图（Plan → Step → LLM Call 嵌套） |
+
+### 3.1 注册获取免费 Key
+
+1. 前往 [cloud.langfuse.com](https://cloud.langfuse.com) 注册（邮箱即可，无需信用卡）
+2. 创建一个 Project（随意命名，如 `bioforge-dev`）
+3. 进入 Project → Settings → API Keys → 生成一对 Key
+4. 复制 **Public Key**（`pk-lf-...`）和 **Secret Key**（`sk-lf-...`）
+
+**免费额度**：Hobby 档每月 **5 万次 observation**（一次 LLM 调用 ≈ 1 次 observation）。  
+按 test_agent 每次 run 约消耗 10-30 次估算，5 万次可支撑 **1500+ 次调试运行**，日常开发完全够用。
+
+### 3.2 配置 .env
+
+在 `.env` 文件中加入（取消注释并填入真实 Key）：
+
+```env
+# Langfuse — LLM 全链路追踪
+LANGFUSE_PUBLIC_KEY=pk-lf-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+LANGFUSE_SECRET_KEY=sk-lf-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+LANGFUSE_HOST=https://cloud.langfuse.com
+```
+
+配置后**重启 Streamlit**（容器重启或 `Ctrl+C` 重跑），下次运行 agent 时自动开始追踪。  
+**不配置则完全静默跳过**，不影响现有任何功能。
+
+### 3.3 追踪数据示例
+
+运行一次 `plan_deep_analysis` 后，在 Langfuse 控制台可以看到：
+
+```
+Trace: test_agent                          总耗时: 42.3s
+├── step_01_search                          12.1s
+│   ├── LLM Call #1  → tool: mock_literature_search   2.1s  421 tokens
+│   ├── LLM Call #2  → tool: mock_literature_search   2.3s  389 tokens
+│   └── LLM Call #3  → Final Answer                   1.8s  312 tokens
+├── step_02_fetch                           15.4s
+│   ├── LLM Call #1  → tool: mock_fetch_details       2.0s  445 tokens
+│   ├── LLM Call #2  → tool: mock_fetch_details       2.2s  401 tokens
+│   └── LLM Call #3  → Final Answer                   1.9s  298 tokens
+├── step_03_analyze                          8.2s
+│   └── LLM Call #1  → tool: mock_binding_analysis    3.1s  892 tokens
+└── step_04_report                           6.6s
+    └── LLM Call #1  → tool: mock_generate_report     2.4s  754 tokens
+
+Total tokens: 4,912  |  Estimated cost: $0.0031
+```
+
+**多轮轮询验证**：在 Langfuse trace 树中可以直观看到 step_01 和 step_02 各有 3 次 LLM Call，其中前 2 次都调用了工具（分页/轮询），第 3 次是最终回答。这就是 agent 自主决策的完整记录。
+
+### 3.4 在 Langfuse 控制台操作
+
+| 功能 | 操作路径 |
+|------|----------|
+| 查看 trace 列表 | 控制台 → Traces（按 session_id = run_id 分组） |
+| 查看某次 run 的完整调用树 | 点击 Trace → 展开 Session 折叠 |
+| 按 agent 过滤 | Tags 筛选（`test`、`search` 等） |
+| 按 plan 过滤 | Tags 筛选（`plan_deep_analysis` 等） |
+| Token 用量统计 | Dashboard → Usage（按日/周/月汇总） |
+| 费用估算 | Dashboard → Cost（按模型分列） |
+| 延迟分布 | Dashboard → Latency（p50 / p95 / p99） |
+
+### 3.5 自建 Langfuse（完全免费，无上限）
+
+如果不想用云服务，可以用官方 Docker Compose 自建：
+
+```bash
+# 克隆官方仓库
+git clone https://github.com/langfuse/langfuse
+cd langfuse
+
+# 启动（需要 Docker Compose）
+docker compose up -d
+```
+
+然后访问 `http://localhost:3000` 完成初始化，将 `.env` 中的 `LANGFUSE_HOST` 改为：
+
+```env
+LANGFUSE_HOST=http://localhost:3000
+```
+
+自建需要额外一个 PostgreSQL 实例（Langfuse 自带一个测试用的，生产建议单独挂载）。
+
+---
+
+## 4. 平台页面完整操作指南
 
 启动后浏览器打开 `http://localhost:8501`，左侧边栏可切换页面。
 
 ---
 
-### 3.1 主页（快捷运行）
+### 4.1 主页（快捷运行）
 
 **适用场景**：不需要调整配置，快速跑一次 test_agent 看框架是否通。
 
@@ -233,7 +329,7 @@ TRACE_DB_URL=sqlite:///data/traces.db
 
 ---
 
-### 3.2 📋 01 运行历史
+### 4.2 📋 01 运行历史
 
 **适用场景**：查看所有历史 agent 运行记录，快速定位成功/失败的运行。
 
@@ -260,7 +356,7 @@ TRACE_DB_URL=sqlite:///data/traces.db
 
 ---
 
-### 3.3 🔍 02 运行详情
+### 4.3 🔍 02 运行详情
 
 **适用场景**：深入分析某次具体运行，逐 step 检查输入/输出/LLM 思考链。
 
@@ -295,7 +391,7 @@ TRACE_DB_URL=sqlite:///data/traces.db
 
 ---
 
-### 3.4 ⚡ 03 对比实验
+### 4.4 ⚡ 03 对比实验
 
 **适用场景**：对比不同模型/配置/plan 下同一个 agent 的运行结果，量化调优效果。
 
@@ -315,7 +411,7 @@ TRACE_DB_URL=sqlite:///data/traces.db
 
 ---
 
-### 3.5 ⚙️ 04 运行编辑器（核心）
+### 4.5 ⚙️ 04 运行编辑器（核心）
 
 **适用场景**：调参实验的主工作台。左侧调配置，右侧实时看结果，是使用最频繁的页面。
 

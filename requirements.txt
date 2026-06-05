@@ -41,3 +41,8 @@ biopython>=1.84
 
 # ==================== 算子调优工具（scripts/debugger/ Streamlit UI） ====================
 streamlit>=1.35.0
+
+# ==================== 可观测性（LLM Tracing） ====================
+# Langfuse：LLM 全链路追踪（token/cost/latency/prompt-output）
+# 配置 LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY 后自动启用，未配置时静默跳过
+langfuse>=2.0
