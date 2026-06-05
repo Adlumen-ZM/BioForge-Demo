@@ -87,12 +87,10 @@ def _render_sidebar() -> None:
         st.markdown("---")
 
         st.markdown("### 📄 页面导航")
-        st.markdown(
-            "- **📋 运行历史** — 查看历史 agent 运行记录\n"
-            "- **🔍 运行详情** — 单次运行的 step 详情\n"
-            "- **⚡ 对比实验** — 并排对比多次运行\n"
-            "- **⚙️ 运行编辑器** — 配置 & 流式运行 agent",
-        )
+        st.page_link("pages/01_runs.py",   label="📋 运行历史",   help="查看历史 agent 运行记录，支持按 stage/状态/时间筛选")
+        st.page_link("pages/02_detail.py", label="🔍 运行详情",   help="单次运行的逐 step 详情，含 LLM 思考链")
+        st.page_link("pages/03_compare.py",label="⚡ 对比实验",   help="并排对比最多3次运行，差异自动高亮")
+        st.page_link("pages/04_editor.py", label="⚙️ 运行编辑器", help="配置编辑 + 流式运行，step 卡片实时出现")
         st.markdown("---")
 
         # ── 当前 session 状态摘要
@@ -156,32 +154,24 @@ st.info(
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.markdown("""
-    ### 📋 运行历史
-    查看全部历史 agent 运行记录。
-    支持按 stage、状态、时间筛选。
-    """)
+    st.markdown("### 📋 运行历史")
+    st.caption("查看全部历史 agent 运行记录。支持按 stage、状态、时间筛选。")
+    st.page_link("pages/01_runs.py", label="前往运行历史 →", use_container_width=True)
 
 with col2:
-    st.markdown("""
-    ### 🔍 运行详情
-    查看单次运行的每个 step：
-    工具调用、输入/输出、耗时、重试。
-    """)
+    st.markdown("### 🔍 运行详情")
+    st.caption("查看单次运行的每个 step：工具调用、输入/输出、耗时、重试。")
+    st.page_link("pages/02_detail.py", label="前往运行详情 →", use_container_width=True)
 
 with col3:
-    st.markdown("""
-    ### ⚡ 对比实验
-    并排对比最多 3 次运行，
-    差异自动高亮，生成文字摘要。
-    """)
+    st.markdown("### ⚡ 对比实验")
+    st.caption("并排对比最多 3 次运行，差异自动高亮，生成文字摘要。")
+    st.page_link("pages/03_compare.py", label="前往对比实验 →", use_container_width=True)
 
 with col4:
-    st.markdown("""
-    ### ⚙️ 运行编辑器
-    内联编辑配置 + 流式运行。
-    step 卡片逐个出现，实时查看进度。
-    """)
+    st.markdown("### ⚙️ 运行编辑器")
+    st.caption("内联编辑配置 + 流式运行。step 卡片逐个出现，实时查看进度。")
+    st.page_link("pages/04_editor.py", label="前往运行编辑器 →", use_container_width=True)
 
 st.markdown("---")
 
