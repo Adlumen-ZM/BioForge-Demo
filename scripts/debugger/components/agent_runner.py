@@ -265,10 +265,13 @@ def _make_langfuse_handler(
         plan_name = (overrides or {}).get("plan_name", "")
         tags = [agent_name] + ([plan_name] if plan_name else [])
 
+        # 官方环境变量名是 LANGFUSE_BASE_URL（SDK 会自动读取）；
+        # 若用户显式配置了 LANGFUSE_BASE_URL，SDK 会优先使用，此处不再手动传 host。
+        # secret_key / public_key 也可以由 SDK 自动读取，但显式传入更明确。
         return CallbackHandler(
             public_key=public_key,
             secret_key=secret_key,
-            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            host=os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
             session_id=run_id,           # 同一 run 的所有 LLM 调用聚合在同一 session
             trace_name=agent_name,       # Langfuse UI 中的 trace 名称
             tags=tags,                   # 便于在 dashboard 按 agent / plan 过滤
