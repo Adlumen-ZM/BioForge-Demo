@@ -29,10 +29,36 @@ scripts/debugger/components/trace_reader.py — Streamlit 版 trace 查询封装
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 import streamlit as st
+
+
+# ─────────────────────────────────────────────
+# 内部工具
+# ─────────────────────────────────────────────
+
+def _normalize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """将每行的 payload 字段从 JSON 字符串反序列化为 dict。
+
+    PostgreSQL JSONB 列已经是 dict，SQLite TEXT 列是 JSON 字符串。
+    统一转换后，UI 页面无需关心底层 DB 类型。
+    """
+    result = []
+    for row in rows:
+        row = dict(row)
+        p = row.get("payload")
+        if isinstance(p, str):
+            try:
+                row["payload"] = json.loads(p)
+            except (json.JSONDecodeError, ValueError):
+                row["payload"] = {}
+        elif p is None:
+            row["payload"] = {}
+        result.append(row)
+    return result
 
 
 # ─────────────────────────────────────────────
@@ -86,7 +112,7 @@ def cached_get_run_events(run_id: str) -> list[dict[str, Any]]:
         return []
     try:
         from backend.src.db_access.trace.reader import get_run_events
-        return get_run_events(engine, run_id)
+        return _normalize_rows(get_run_events(engine, run_id))
     except Exception as e:
         st.warning(f"查询 run_events 失败：{e}")
         return []
@@ -132,7 +158,7 @@ def cached_get_recent_failed_steps(
         return []
     try:
         from backend.src.db_access.trace.reader import get_recent_failed_steps
-        return get_recent_failed_steps(engine, stage=stage, limit=limit)
+        return _normalize_rows(get_recent_failed_steps(engine, stage=stage, limit=limit))
     except Exception as e:
         st.warning(f"查询 failed_steps 失败：{e}")
         return []
