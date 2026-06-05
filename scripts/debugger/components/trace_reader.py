@@ -43,16 +43,24 @@ import streamlit as st
 def get_engine():
     """获取 SQLAlchemy Engine（跨 session 共享连接池）。
 
-    从 TRACE_DB_URL 环境变量读取连接串。
-    未配置时返回 None，调用方需处理 None 值。
+    根据 TRACE_DB_URL 前缀自动选择后端：
+      - sqlite:///...   → SQLiteBackend（本地开发，无需 Docker）
+      - postgresql://...→ PostgresBackend（生产/CI）
+      - 未配置          → None（只打印，不落盘）
 
     Returns:
         SQLAlchemy Engine 实例，或 None（TRACE_DB_URL 未配置时）。
     """
+    url = os.getenv("TRACE_DB_URL", "")
+    if not url:
+        return None
     try:
-        from backend.src.db_access.trace.postgres_backend import get_trace_engine
-        engine = get_trace_engine()
-        return engine
+        if url.startswith("sqlite"):
+            from components.sqlite_backend import get_sqlite_engine
+            return get_sqlite_engine()
+        else:
+            from backend.src.db_access.trace.postgres_backend import get_trace_engine
+            return get_trace_engine()
     except Exception as e:
         st.warning(f"连接 trace DB 失败：{e}。请检查 TRACE_DB_URL 配置。")
         return None
@@ -176,8 +184,14 @@ def list_recent_runs(
             params["status"] = status_filter
 
         if time_range_hours:
-            conditions.append("created_at >= NOW() - INTERVAL ':hours hours'")
-            params["hours"] = time_range_hours
+            _url = os.getenv("TRACE_DB_URL", "")
+            if _url.startswith("sqlite"):
+                # SQLite 方言：datetime() 函数，hours 是受控整数，无注入风险
+                conditions.append(f"created_at >= datetime('now', '-{int(time_range_hours)} hours')")
+            else:
+                # PostgreSQL 方言：用命名参数避免字符串拼接
+                conditions.append("created_at >= NOW() - :hours * INTERVAL '1 hour'")
+                params["hours"] = time_range_hours
 
         where_clause = " AND ".join(conditions)
         sql = f"""

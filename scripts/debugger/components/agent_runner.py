@@ -288,14 +288,18 @@ class AgentRunner:
         trace_db_url = os.getenv("TRACE_DB_URL")
         backends = []
 
-        # 优先接入 Postgres（若配置了 TRACE_DB_URL）
+        # 根据 TRACE_DB_URL 前缀自动选择持久化 backend
         if trace_db_url:
             try:
-                from backend.src.db_access.trace.postgres_backend import PostgresBackend
-                backends.append(PostgresBackend())
+                if trace_db_url.startswith("sqlite"):
+                    from components.sqlite_backend import SQLiteBackend
+                    backends.append(SQLiteBackend())
+                else:
+                    from backend.src.db_access.trace.postgres_backend import PostgresBackend
+                    backends.append(PostgresBackend())
                 has_db = True
             except Exception as e:
-                print(f"[AgentRunner] ⚠️ PostgresBackend 初始化失败：{e}")
+                print(f"[AgentRunner] ⚠️ DB backend 初始化失败：{e}")
                 has_db = False
         else:
             has_db = False
@@ -408,13 +412,18 @@ class AgentRunner:
                     StreamlitProgressBackend(progress_queue),
                 ]
 
-                # 若有 DB 则同时写库
-                if os.getenv("TRACE_DB_URL"):
+                # 若有 DB 则同时写库（根据 URL 前缀自动选择 SQLite 或 Postgres）
+                _trace_url = os.getenv("TRACE_DB_URL", "")
+                if _trace_url:
                     try:
-                        from backend.src.db_access.trace.postgres_backend import PostgresBackend
-                        backends.insert(0, PostgresBackend())
+                        if _trace_url.startswith("sqlite"):
+                            from components.sqlite_backend import SQLiteBackend
+                            backends.insert(0, SQLiteBackend())
+                        else:
+                            from backend.src.db_access.trace.postgres_backend import PostgresBackend
+                            backends.insert(0, PostgresBackend())
                     except Exception as db_err:
-                        print(f"[AgentRunner] ⚠️ PostgresBackend 初始化失败：{db_err}")
+                        print(f"[AgentRunner] ⚠️ DB backend 初始化失败：{db_err}")
 
                 agent.hook.backend = CompositeBackend(*backends)
 
