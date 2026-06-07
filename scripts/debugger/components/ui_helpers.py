@@ -120,6 +120,69 @@ def render_status_badge(status: str) -> str:
 
 
 # ─────────────────────────────────────────────
+# render_replan_card
+# ─────────────────────────────────────────────
+
+def render_replan_card(payload: dict) -> None:
+    """渲染 MODIFY_STEP replan 事件卡片（两次 step 尝试之间的紫色分隔块）。
+
+    在时间轴视图中作为独立元素插入，清晰分隔失败尝试与 replan 后的重试。
+    展示：原始指令 vs 改写后指令（并排）、改写理由、触发时 retry_count、模型。
+    """
+    retry_at = payload.get("retry_count_at_replan", "?")
+    orig     = payload.get("original_instruction") or "—"
+    new_inst = payload.get("new_instruction") or "—"
+    reason   = payload.get("replan_reason") or ""
+    model    = payload.get("model_used") or ""
+
+    # ── 紫色标题行
+    model_str = f"  ·  模型：<code>{model}</code>" if model else ""
+    st.markdown(
+        f'<div style="border-left:4px solid #A78BFA; background:#1e1a2e; '
+        f'padding:10px 14px; border-radius:6px; margin:10px 0 4px 0;">'
+        f'<span style="color:#A78BFA; font-weight:bold; font-size:1.05em;">'
+        f'🔧 MODIFY_STEP Replan 触发</span>'
+        f'<span style="color:#888; font-size:0.85em; margin-left:12px;">'
+        f'retry_count={retry_at}{model_str}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 原始指令 vs 改写后指令（并排两列）
+    col_orig, col_new = st.columns(2)
+    with col_orig:
+        st.markdown('<span style="color:#888; font-size:0.9em;">▶ 原始指令</span>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="background:#141420; padding:8px 10px; border-radius:4px; '
+            f'font-size:0.82em; color:#aaa; white-space:pre-wrap; line-height:1.4;">'
+            f'{orig[:200]}{"…" if len(orig) >= 200 else ""}</div>',
+            unsafe_allow_html=True,
+        )
+    with col_new:
+        st.markdown('<span style="color:#A78BFA; font-size:0.9em;">✨ 改写后指令</span>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="background:#1e1a2e; padding:8px 10px; border-radius:4px; '
+            f'border:1px solid #A78BFA55; font-size:0.82em; color:#ddd; '
+            f'white-space:pre-wrap; line-height:1.4;">'
+            f'{new_inst[:200]}{"…" if len(new_inst) >= 200 else ""}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 改写理由
+    if reason:
+        st.markdown(
+            f'<div style="color:#A78BFA; font-size:0.85em; margin:6px 0 0 4px;">'
+            f'💡 改写理由：{reason[:200]}</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown(
+        '<div style="border-bottom:1px solid #A78BFA44; margin:10px 0 6px 0;"></div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ─────────────────────────────────────────────
 # render_step_card
 # ─────────────────────────────────────────────
 
