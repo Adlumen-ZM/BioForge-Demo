@@ -56,6 +56,8 @@ _PLAN_NAMES = {
     "plan_abort_scenario": "plan_abort_scenario",
     "plan_full_coverage": "plan_full_coverage",
     "plan_deep_analysis": "plan_deep_analysis",
+    "plan_modify_step":   "plan_modify_step",    # ⭐ MODIFY_STEP replan 验证场景
+    "modify_step":        "plan_modify_step",
 }
 
 # test_agent 专属的 mock tools 白名单（物理隔离，禁止真实 agent 使用）
@@ -130,8 +132,13 @@ def create_test_agent(
         plan_path = _AGENT_DIR / "plans" / f"{canonical_name}.yaml"
 
     # ── 解析其他覆盖参数 ───────────────────────────────────────────────────────
-    resolved_temperature = overrides.get("temperature", temperature)
-    resolved_summary_mode = overrides.get("summary_mode", summary_mode)
+    resolved_temperature    = overrides.get("temperature", temperature)
+    resolved_summary_mode   = overrides.get("summary_mode", summary_mode)
+    # ⭐ replan 策略（默认 rule_only，算子调优工具可通过 overrides 覆盖）
+    resolved_replan_strategy  = overrides.get("replan_strategy", "rule_only")
+    resolved_replan_threshold = int(overrides.get("replan_threshold", 1))
+    # plan_modify_step 需要更多重试次数（最多3次：RETRY + MODIFY_STEP + 最终尝试）
+    resolved_max_step_retries = int(overrides.get("max_step_retries", 2))
 
     # ── 构建 AgentTemplateConfig ───────────────────────────────────────────────
     config = AgentTemplateConfig(
@@ -141,12 +148,14 @@ def create_test_agent(
         skills_dir=_AGENT_DIR / "skills",
         model=resolved_model,
         temperature=resolved_temperature,
-        tools=_TEST_TOOLS,           # 只给 test_agent 用的 mock tools
-        max_step_retries=2,          # 允许最多 2 次 retry（覆盖 abort_scenario 边界）
+        tools=_TEST_TOOLS,                    # 只给 test_agent 用的 mock tools
+        max_step_retries=resolved_max_step_retries,
         max_plan_retries=1,
         summary_mode=resolved_summary_mode,
         enable_trace=True,
-        enable_memory=False,         # v0.1 不接线 memory
+        enable_memory=False,                  # v0.1 不接线 memory
+        replan_strategy=resolved_replan_strategy,
+        replan_threshold=resolved_replan_threshold,
     )
 
     return AgentTemplate(config)

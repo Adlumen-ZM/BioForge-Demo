@@ -277,6 +277,45 @@ with left_col:
         overrides["model"] = model_input.strip()
         st.session_state["editor_model"] = model_input.strip()
 
+    # ── Replan 配置（test_agent 专属，用于验证 MODIFY_STEP 路径）
+    if agent_name == "test":
+        with st.expander("🔧 Replan 配置（MODIFY_STEP）", expanded=(
+            st.session_state.get("editor_plan") == "plan_modify_step"
+        )):
+            st.caption(
+                "控制 step 失败后的重规划策略。"
+                "选 `llm_on_exhaustion` + 运行 `plan_modify_step` 可观察 LLM 改写指令的完整流程。"
+            )
+            replan_strategy = st.selectbox(
+                "Replan 策略",
+                options=["rule_only", "llm_on_exhaustion"],
+                index=0,
+                key="sel_replan_strategy",
+                help=(
+                    "rule_only（默认）：只做 RETRY / ABORT，不调 LLM，保持 v0.1 行为。\n"
+                    "llm_on_exhaustion：达到 replan_threshold 次失败后，调 LLM 改写 step.instruction。"
+                ),
+            )
+            replan_threshold = st.number_input(
+                "Replan 阈值（replan_threshold）",
+                min_value=0, max_value=5, value=1, step=1,
+                key="num_replan_threshold",
+                help="retry_count 达到此值时升级到 LLM 改写（仅 llm_on_exhaustion 有效）。默认 1。",
+            )
+            max_step_retries_override = st.number_input(
+                "max_step_retries（覆盖）",
+                min_value=1, max_value=5, value=3, step=1,
+                key="num_max_step_retries",
+                help=(
+                    "plan_modify_step 需要至少 3 次（RETRY + MODIFY_STEP + 最终尝试）。"
+                    "默认值 3，运行其他 plan 时可改回 2。"
+                ),
+            )
+            # 写入 overrides（rule_only 时也传，保持可见性）
+            overrides["replan_strategy"]  = replan_strategy
+            overrides["replan_threshold"] = int(replan_threshold)
+            overrides["max_step_retries"] = int(max_step_retries_override)
+
     # ── Identity YAML 内联编辑（只在内存 overrides，不写回文件）
     with st.expander("📄 Identity YAML（内联编辑）", expanded=False):
         st.caption("⚠️ 仅在内存中生效，不写回原文件。留空则使用 agent 默认 identity。")
