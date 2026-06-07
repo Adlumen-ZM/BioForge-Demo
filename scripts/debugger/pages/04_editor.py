@@ -286,10 +286,14 @@ with left_col:
                 "控制 step 失败后的重规划策略。"
                 "选 `llm_on_exhaustion` + 运行 `plan_modify_step` 可观察 LLM 改写指令的完整流程。"
             )
+            # plan_modify_step 被选中时默认开启 llm_on_exhaustion，其余默认 rule_only
+            _default_strategy_idx = (
+                1 if st.session_state.get("editor_plan") == "plan_modify_step" else 0
+            )
             replan_strategy = st.selectbox(
                 "Replan 策略",
                 options=["rule_only", "llm_on_exhaustion"],
-                index=0,
+                index=_default_strategy_idx,
                 key="sel_replan_strategy",
                 help=(
                     "rule_only（默认）：只做 RETRY / ABORT，不调 LLM，保持 v0.1 行为。\n"
