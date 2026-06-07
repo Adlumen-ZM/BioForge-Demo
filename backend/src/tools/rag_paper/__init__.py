@@ -21,7 +21,7 @@ tools/rag_paper/ — PepClaw RAG 工具注册层
     )
     tools = [run_bio_paper_extraction_pipeline, parse_pdf_with_ragflow, retrieve_pdf_evidence]
 """
-from tools.rag_paper.tools import (  # noqa: F401
+from .tools import (  # noqa: F401
     parse_pdf_with_ragflow,
     retrieve_pdf_evidence,
     run_bio_paper_extraction_pipeline,

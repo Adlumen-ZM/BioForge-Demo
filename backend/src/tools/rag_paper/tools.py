@@ -28,12 +28,14 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
-from tools.rag_paper.schemas import (
+# 相对导入：tools.py 与 schemas.py / service_factory.py 同包，
+# 用相对导入避免依赖调用方的 sys.path 配置。
+from .schemas import (
     ParsePDFInput,
     RetrieveEvidenceInput,
     RunBioPaperPipelineInput,
 )
-from tools.rag_paper.service_factory import build_rag_service
+from .service_factory import get_rag_service
 
 
 @tool(
@@ -55,7 +57,7 @@ def run_bio_paper_extraction_pipeline(pdf_path: str) -> dict:
     """
     if not Path(pdf_path).exists():
         raise FileNotFoundError(f"PDF 文件不存在: {pdf_path}")
-    service = build_rag_service()
+    service = get_rag_service()
     return service.run_pipeline(pdf_path)
 
 
@@ -77,7 +79,7 @@ def parse_pdf_with_ragflow(pdf_path: str) -> dict:
     """
     if not Path(pdf_path).exists():
         raise FileNotFoundError(f"PDF 文件不存在: {pdf_path}")
-    service = build_rag_service()
+    service = get_rag_service()
     return service.parse_pdf(pdf_path)
 
 
@@ -97,5 +99,5 @@ def retrieve_pdf_evidence(parse_id: str, query: str, top_k: int = 8) -> dict:
     适用场景：review_agent 验证某字段的文献依据；或 extract_agent 需要
     定向检索特定实体 / 字段证据时调用（可用不同 query 多次检索同一 PDF）。
     """
-    service = build_rag_service()
+    service = get_rag_service()
     return service.retrieve_evidence(parse_id=parse_id, query=query, top_k=top_k)
