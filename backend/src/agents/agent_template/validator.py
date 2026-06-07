@@ -100,13 +100,31 @@ def validate_plan(
     except Exception as e:
         raise ValidationError(f"validate_plan LLM 调用失败：{e}") from e
 
-    # 解析 LLM 回答：期望 "yes" 或 "no" 开头
-    if answer.startswith("yes"):
+    # 解析 LLM 回答：兼容英文 yes/no 及中文模型常见回答格式
+    # 中文模型（如 deepseek）可能回答「是的」「满足」「否，因为...」等，
+    # 不能只检查 startswith("yes")
+    _YES = ("yes", "是的", "是,", "是。", "是 ", "满足", "通过", "符合", "✅")
+    _NO  = ("no", "否", "不满足", "不符合", "未满足", "不通过", "❌")
+
+    answer_head = answer[:60]  # 只看开头，避免理由中的关键词干扰
+    is_yes = any(answer_head.startswith(s) for s in _YES)
+    is_no  = any(answer_head.startswith(s) for s in _NO)
+
+    if is_yes and not is_no:
         return True, ""
-    else:
-        # 提取 LLM 给出的理由
-        reason = answer.removeprefix("no").lstrip("：:,. \n")
+    elif is_no:
+        # 提取 LLM 给出的理由（去掉前缀词）
+        reason = answer
+        for prefix in _NO:
+            if reason.startswith(prefix):
+                reason = reason[len(prefix):].lstrip("，,：:。. \n")
+                break
         return False, reason or "LLM 判断输出不满足 output_contract"
+    else:
+        # 回答格式不符合预期（未以 yes/no 类词开头），在全文中搜索信号
+        if any(s in answer for s in _YES):
+            return True, ""
+        return False, f"LLM 回答格式异常（期望 yes/no 开头）：{answer[:100]}"
 
 
 def _check_criteria(output: dict[str, Any], criteria: dict[str, Any]) -> tuple[bool, str]:
@@ -150,9 +168,9 @@ def _build_validate_plan_prompt(final_output: dict[str, Any], output_contract: d
     contract_json = json.dumps(output_contract, ensure_ascii=False, indent=2)
     output_json = json.dumps(final_output, ensure_ascii=False, indent=2)
 
-    return f"""你是一个输出质量检查助手。请判断以下「实际输出」是否满足「输出契约」的要求。
+    return f"""你是一个输出质量检查助手。判断「实际输出」是否包含「输出契约」要求的全部字段，且字段值非空。
 
-## 输出契约（期望）
+## 输出契约（要求的字段及说明）
 ```json
 {contract_json}
 ```
@@ -162,4 +180,10 @@ def _build_validate_plan_prompt(final_output: dict[str, Any], output_contract: d
 {output_json}
 ```
 
-请仅回答 "yes" 或 "no，<简短理由>"。不要输出其他内容。"""
+判断规则：实际输出中是否存在契约要求的所有字段（key），且值不为 null/空字符串/空列表。不校验值的具体内容，只看字段是否存在。
+
+请用以下格式回答（第一个词必须是 yes 或 no，英文小写）：
+- 满足：yes
+- 不满足：no，<缺少或为空的字段名>
+
+不要输出其他内容。"""
