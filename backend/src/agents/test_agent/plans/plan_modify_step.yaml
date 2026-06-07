@@ -48,13 +48,13 @@ steps:
   - step_id: "step_03_verify"
     name: "验证 replan 流程完整"
     instruction: |
-      调用 mock_success 工具，输出包含 framework_behaviors_verified 字段。
-      输出格式：
+      调用 mock_success 工具，输出以下完整 JSON 格式（必须包含全部三个字段）：
       {
         "test_result": "success",
+        "steps_executed": 5,
         "framework_behaviors_verified": ["modify_step_replan", "llm_instruction_update", "step_replanned_trace"]
       }
     tools_required: ["mock_success"]
     success_criteria:
-      required_fields: ["test_result"]
+      required_fields: ["test_result", "steps_executed"]
     max_retries: 1
