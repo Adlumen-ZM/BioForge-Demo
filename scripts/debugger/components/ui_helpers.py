@@ -148,12 +148,25 @@ def render_step_card(step_data: dict[str, Any], expanded: bool = True,
             "tools_required": ["mock_success"],
             "step_name": "...",
             "max_retries": 1,
-        }
+        },
+        # ⭐ MODIFY_STEP replan 信息（经历过 LLM 改写指令时由 _update_steps_state 注入）：
+        "replan_history": [
+            {
+                "trigger": "modify_step",
+                "original_instruction": "...(截断200字)",
+                "new_instruction": "...(截断200字)",
+                "replan_reason": "...",
+                "retry_count_at_replan": 1,
+                "model_used": "minimax/...",
+            },
+            ...  # 可能有多次 replan
+        ]
       }
 
     Args:
         step_data: TraceEvent.to_dict() 输出（step_start + step_end 合并后的 dict）。
         expanded: expander 默认是否展开（默认 True）。
+        llm_events: LLM/工具调用事件列表（_UITracer 捕获），用于渲染思考链。
     """
     step_id   = step_data.get("step_id", "unknown_step")
     status    = step_data.get("status", "unknown")
@@ -187,6 +200,35 @@ def render_step_card(step_data: dict[str, Any], expanded: bool = True,
         # ── 重试提示
         if retry_cnt > 0:
             st.warning(f"🔁 该 step 重试了 **{retry_cnt}** 次")
+
+        # ⭐ MODIFY_STEP replan 详情（LLM 曾改写过指令时展示）
+        replan_history = step_data.get("replan_history") or []
+        if replan_history:
+            with st.expander(
+                f"🔧 MODIFY_STEP Replan（共改写 {len(replan_history)} 次）",
+                expanded=True,
+            ):
+                for i, rp in enumerate(replan_history, 1):
+                    if len(replan_history) > 1:
+                        st.markdown(f"**第 {i} 次改写**")
+                    retry_at = rp.get("retry_count_at_replan", "?")
+                    model_used = rp.get("model_used", "")
+                    st.caption(
+                        f"触发时 retry_count={retry_at}"
+                        + (f"  ·  模型：`{model_used}`" if model_used else "")
+                    )
+                    col_orig, col_new = st.columns(2)
+                    orig = rp.get("original_instruction") or "—"
+                    new  = rp.get("new_instruction") or "—"
+                    with col_orig:
+                        st.markdown("**原始指令**")
+                        st.caption(orig + ("…" if len(orig) >= 200 else ""))
+                    with col_new:
+                        st.markdown("**改写后指令**")
+                        st.caption(new + ("…" if len(new) >= 200 else ""))
+                    reason = rp.get("replan_reason") or ""
+                    if reason:
+                        st.info(f"💡 改写理由：{reason}")
 
         st.divider()
 

@@ -115,15 +115,20 @@ _LLM_TRACE_ETYPES = {"llm_start", "llm_end", "tool_call", "tool_result", "llm_er
 def _update_steps_state(steps_state: dict[str, Any], event: dict[str, Any]) -> None:
     """根据 TraceEvent / LLM Trace 事件 dict 更新 steps_state。
 
-    step_start → status=running（占位），初始化 llm_trace=[]
-    step_end   → 完整事件数据（含 status / output / duration 等）
+    step_start    → status=running（占位），初始化 llm_trace=[]
+                    保留跨次执行的 replan_history（MODIFY_STEP 重试时 step_start 会再次到来）
+    step_end      → 完整事件数据（含 status / output / duration 等）
+                    保留 replan_history 和 llm_trace
+    step_replanned → 将 replan payload 追加到 replan_history 列表，不影响其他字段
     llm_start / llm_end / tool_call / tool_result / llm_error
-               → 追加到对应 step 的 llm_trace 列表
+                  → 追加到对应 step 的 llm_trace 列表
     其他事件（plan_start/plan_end）→ 忽略
 
     Args:
         steps_state: step_id → 事件状态 dict，就地修改。
-                     每条记录额外含 "llm_trace": list[dict] 字段。
+                     每条记录额外含：
+                       "llm_trace":     list[dict]  — LLM/工具调用事件
+                       "replan_history": list[dict]  — MODIFY_STEP replan 事件 payload 列表
         event: 从 progress_queue 取出的事件 dict。
     """
     etype   = event.get("event_type", event.get("type", ""))
@@ -140,10 +145,13 @@ def _update_steps_state(steps_state: dict[str, Any], event: dict[str, Any]) -> N
         return
 
     if etype == "step_start":
+        existing = steps_state.get(step_id, {})
         steps_state[step_id] = {
             **event,
             "status": "running",
-            "llm_trace": [],  # 初始化空列表，后续 LLM 事件追加进来
+            "llm_trace": [],  # 重置本次执行的 LLM 事件列表
+            # ⭐ 保留跨次执行的 replan 历史（MODIFY_STEP 重试时 step_start 会再次到来）
+            "replan_history": existing.get("replan_history", []),
         }
     elif etype == "step_end":
         # 合并 step_start 的 payload（含 tools_required）到 step_end 数据
@@ -156,7 +164,19 @@ def _update_steps_state(steps_state: dict[str, Any], event: dict[str, Any]) -> N
             **existing,
             **event,
             "payload": merged_payload,
-            "llm_trace": existing.get("llm_trace", []),  # 保留已积累的 LLM 事件
+            "llm_trace": existing.get("llm_trace", []),       # 保留已积累的 LLM 事件
+            "replan_history": existing.get("replan_history", []),  # 保留 replan 历史
+        }
+    elif etype == "step_replanned":
+        # ⭐ MODIFY_STEP replan 事件：将 replan payload 追加到历史列表
+        # 此事件在 step_end(failed) 之后、下一次 step_start 之前到来
+        # 不修改 step 的 status，只追加 replan 记录供 UI 展示
+        existing = steps_state.get(step_id, {})
+        replan_history = list(existing.get("replan_history", []))
+        replan_history.append(event.get("payload", {}))
+        steps_state[step_id] = {
+            **existing,
+            "replan_history": replan_history,
         }
 
 
@@ -183,7 +203,18 @@ def _render_streaming_view(steps_state: dict[str, Any]) -> None:
             if tool_cnt:
                 detail.append(f"工具×{tool_cnt}")
             hint = ("  |  " + ", ".join(detail)) if detail else ""
-            st.info(f"🔄 **{sid}** — 执行中...{hint}")
+            # ⭐ replan 中：已被 MODIFY_STEP 改写指令，正在用新指令重试
+            if sdata.get("replan_history"):
+                replan_cnt = len(sdata["replan_history"])
+                st.markdown(
+                    f'<div style="background:#3d1f6e;border-left:4px solid #A78BFA;'
+                    f'padding:8px 12px;border-radius:4px;margin:4px 0;">'
+                    f'🔧 <b>{sid}</b> — 已 MODIFY_STEP（第{replan_cnt}次改写），正在用新指令重试...{hint}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info(f"🔄 **{sid}** — 执行中...{hint}")
         else:
             render_step_card(sdata, expanded=(status == "failed"),
                              llm_events=llm_events or None)
