@@ -157,8 +157,10 @@ def _build_patch(
     if "candidate_paper_ids" in final:
         patch["candidate_paper_ids"] = final["candidate_paper_ids"]
 
-    # agent 特定摘要字段
-    summary_key = f"{agent_name.lower().replace(' ', '_')}_summary"
+    # agent 特定摘要字段（去掉 _agent 后缀，与 PipelineState 字段名对齐）
+    # "search_agent" → "search_summary" ✅  "test_agent" → "test_summary" ✅
+    stage_name = agent_name.lower().replace("_agent", "").replace(" ", "_")
+    summary_key = f"{stage_name}_summary"
     patch[summary_key] = summary_text
 
     # 运行元数据（调试用）

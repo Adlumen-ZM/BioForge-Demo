@@ -18,6 +18,7 @@ config.py — AgentTemplate 配置模型
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -83,6 +84,19 @@ class AgentTemplateConfig(BaseModel):
     enable_memory: bool = False
     """内存功能开关（v0.1 固定为 False，不接线 db_access/memory/）。
     未来：True 时 context_builder 从 PostgresStore 读取 memory_refs 注入上下文。
+    """
+
+    # ── Replan 策略 ───────────────────────────
+    replan_strategy: Literal["rule_only", "llm_on_exhaustion"] = "rule_only"
+    """Replan 策略：
+      rule_only（默认）：只做 RETRY / ABORT，不调 LLM，保持 v0.1 行为。
+      llm_on_exhaustion：用掉 replan_threshold 次重试后，调 LLM 修改 step.instruction。
+    """
+
+    replan_threshold: int = Field(default=1, ge=0)
+    """触发 LLM MODIFY_STEP 的重试次数阈值（retry_count >= 此值时升级到 LLM 修改）。
+    默认 1：第1次失败简单重试，第2次失败触发 LLM 修改 instruction。
+    若 replan_threshold >= max_step_retries，永远不触发 MODIFY_STEP（退化为 rule_only）。
     """
 
     model_config = {"arbitrary_types_allowed": True}

@@ -33,21 +33,23 @@ import streamlit as st
 # ─────────────────────────────────────────────
 
 STATUS_COLORS: dict[str, str] = {
-    "success": "#00D4AA",   # teal — 成功
-    "failed":  "#FF4B4B",   # red  — 失败
-    "running": "#FFA500",   # orange — 进行中
-    "skipped": "#888888",   # gray — 已跳过
-    "partial": "#FFD700",   # gold — 部分成功
-    "unknown": "#AAAAAA",   # light gray — 未知状态
+    "success":   "#00D4AA",   # teal — 成功
+    "failed":    "#FF4B4B",   # red  — 失败
+    "running":   "#FFA500",   # orange — 进行中
+    "skipped":   "#888888",   # gray — 已跳过
+    "partial":   "#FFD700",   # gold — 部分成功
+    "unknown":   "#AAAAAA",   # light gray — 未知状态
+    "replanned": "#A78BFA",   # purple — MODIFY_STEP replan（指令被 LLM 改写过）
 }
 
 STATUS_ICONS: dict[str, str] = {
-    "success": "✅",
-    "failed":  "❌",
-    "running": "🔄",
-    "skipped": "⏭",
-    "partial": "⚠️",
-    "unknown": "❓",
+    "success":   "✅",
+    "failed":    "❌",
+    "running":   "🔄",
+    "skipped":   "⏭",
+    "partial":   "⚠️",
+    "unknown":   "❓",
+    "replanned": "🔧",   # MODIFY_STEP replan
 }
 
 

@@ -124,7 +124,8 @@ from backend.src.agents.my_agent.agent import create_my_agent
 
 agent = create_my_agent(model="openai/gpt-4o")
 patch = agent.run(pipeline_state={})
-# patch = {'candidate_paper_ids': [...], 'my_agent_summary': '...', 'run_metadata': {...}}
+# patch = {'candidate_paper_ids': [...], 'my_summary': '...', 'run_metadata': {...}}
+# 注：summary_key 规则 = agent_name 去掉 _agent 后缀，"my_agent" → "my_summary"
 ```
 
 ## 接入 graph 层
@@ -155,8 +156,11 @@ patch = agent.run()
 ## 常见问题
 
 **Q：plan step 执行失败怎么办？**
-A：replanner 会根据重试次数决定 retry 或 abort。retry 不修改 step 定义，
-    超过 max_retries 后 abort 整个 run，返回 `status='failed'` 的 AgentRunResult。
+A：replanner 根据配置决定后续动作：
+- `replan_strategy="rule_only"`（默认）：retry_count < max_retries 时 RETRY，否则 ABORT。
+- `replan_strategy="llm_on_exhaustion"`：retry_count 达到 `replan_threshold` 后触发 MODIFY_STEP——LLM 根据失败原因改写 step.instruction，然后继续重试；LLM 失败时静默降级为普通 RETRY。
+- 所有重试耗尽后 ABORT，返回 `status='failed'` 的 AgentRunResult。
+- 在 `agent.py` 中配置：`AgentTemplateConfig(replan_strategy="llm_on_exhaustion", replan_threshold=1, ...)`。
 
 **Q：如何让 step 间共享上下文？**
 A：成功的 step 结果会通过 `StepResult.summary` 自动注入下一 step 的 context_builder，

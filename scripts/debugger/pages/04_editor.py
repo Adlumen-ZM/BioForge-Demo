@@ -91,6 +91,7 @@ PLAN_OPTIONS: dict[str, str] = {
     "plan_abort_scenario":  "💥 持续失败→中止（mock_fail）",
     "plan_full_coverage":   "🧪 全分支覆盖（4步串联）",
     "plan_deep_analysis":   "🔬 深度分析（多轮轮询 + validate_plan 失败）",
+    "plan_modify_step":     "🔧 MODIFY_STEP Replan（LLM 改写指令）",  # ⭐ 新增
 }
 
 AGENT_OPTIONS: dict[str, str] = {

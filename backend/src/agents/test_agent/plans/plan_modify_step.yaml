@@ -1,0 +1,60 @@
+# test_agent/plans/plan_modify_step.yaml
+# 场景：step 失败 → 触发 LLM MODIFY_STEP → 修改后重试成功
+# 目标：验证 replan_strategy="llm_on_exhaustion" 路径
+#
+# 使用前提：config 需设置：
+#   replan_strategy = "llm_on_exhaustion"
+#   replan_threshold = 1
+#   max_step_retries = 3  （或 step 级 max_retries=3，取较小值）
+#
+# 关键设计（依赖 mock_flaky 模块级计数器在整个 run 内持续累计）：
+#   step_02 使用 mock_flaky(fail_count=2, call_id="step_02_modify")，max_retries=3
+#   replan_threshold=1 时执行序列：
+#     执行1 → retry_count=0 < threshold=1 → RETRY（原指令重试）
+#     执行2 → retry_count=1 >= threshold=1 → MODIFY_STEP（LLM 改写指令）
+#             → trace 写入 step_replanned 事件
+#     执行3 → mock_flaky 第3次调用（call_count=3 > fail_count=2） → 成功
+#   最终 plan status = "success"
+#
+# 注意：mock_flaky 本身不看 instruction，MODIFY_STEP 在此仅验证框架层面的
+#       replan 流程（instruction 改变 + step_replanned trace 事件产生）
+
+plan_id: "test_modify_step_v01"
+agent_name: "test_agent"
+version: "1.0"
+
+steps:
+  - step_id: "step_01_normal"
+    name: "前置正常步骤"
+    instruction: |
+      调用 mock_success 工具获取默认输出，验证前置步骤正常。
+      输出格式：{"result": "ok", "value": 42}
+    tools_required: ["mock_success"]
+    success_criteria:
+      required_fields: ["result"]
+    max_retries: 1
+
+  - step_id: "step_02_trigger_modify"
+    name: "触发 MODIFY_STEP 的步骤"
+    instruction: |
+      调用 mock_flaky 工具，参数 fail_count=2, call_id="step_02_modify"。
+      该工具前2次调用失败，第3次调用成功。
+      成功时输出：{"status": "success", "call_count": 3}
+    tools_required: ["mock_flaky"]
+    success_criteria:
+      required_fields: ["status"]
+    max_retries: 3
+
+  - step_id: "step_03_verify"
+    name: "验证 replan 流程完整"
+    instruction: |
+      调用 mock_success 工具，输出包含 framework_behaviors_verified 字段。
+      输出格式：
+      {
+        "test_result": "success",
+        "framework_behaviors_verified": ["modify_step_replan", "llm_instruction_update", "step_replanned_trace"]
+      }
+    tools_required: ["mock_success"]
+    success_criteria:
+      required_fields: ["test_result"]
+    max_retries: 1
