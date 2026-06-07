@@ -114,9 +114,9 @@ def _render_sidebar() -> None:
         last_result = st.session_state.get("last_result")
         if last_result:
             last_run_id = st.session_state.get("last_run_id", "—")
-            status = last_result.get("status", "unknown")
-            icon = "✅" if status == "success" else "❌"
-            st.markdown(f"**最近运行**：{icon} `{last_run_id}`")
+            status = (last_result.get("run_metadata") or {}).get("status", "unknown")
+            icon = "✅" if status == "success" else ("⚠️" if status == "partial" else "❌")
+            st.markdown(f"**最近运行**：{icon} `{last_run_id}` · {status}")
 
         st.markdown("---")
 
@@ -187,6 +187,7 @@ PLAN_OPTIONS = {
     "plan_abort_scenario":  "💥 持续失败→中止",
     "plan_full_coverage":   "🧪 全分支覆盖",
     "plan_deep_analysis":   "🔬 深度分析（多轮轮询）",
+    "plan_modify_step":     "🔧 MODIFY_STEP Replan（LLM 改写指令）",
 }
 
 with quick_col1:
@@ -248,7 +249,7 @@ if quick_run:
                 status_bar.error(f"❌ 运行出错：{event.get('error')}")
                 break
 
-            # step_start → running；step_end → success/failed；LLM trace → 追加到 step
+            # step 事件分发（与 04_editor._update_steps_state 逻辑保持一致）
             step_id = event.get("step_id")
             _LLM_ETYPES = {"llm_start", "llm_end", "tool_call", "tool_result", "llm_error"}
 
@@ -258,7 +259,12 @@ if quick_run:
                 updated = True
             elif step_id:
                 if etype == "step_start":
-                    steps_state[step_id] = {**event, "status": "running", "llm_trace": []}
+                    existing = steps_state.get(step_id, {})
+                    steps_state[step_id] = {
+                        **event, "status": "running", "llm_trace": [],
+                        # 保留跨次执行的 replan 历史（MODIFY_STEP 重试时不丢失）
+                        "replan_history": existing.get("replan_history", []),
+                    }
                 elif etype == "step_end":
                     existing = steps_state.get(step_id, {})
                     start_payload = existing.get("payload") or {}
@@ -267,7 +273,14 @@ if quick_run:
                         **existing, **event,
                         "payload": {**start_payload, **end_payload},
                         "llm_trace": existing.get("llm_trace", []),
+                        "replan_history": existing.get("replan_history", []),
                     }
+                elif etype == "step_replanned":
+                    # ⭐ MODIFY_STEP replan 事件：追加到 replan_history
+                    existing = steps_state.get(step_id, {})
+                    replan_history = list(existing.get("replan_history", []))
+                    replan_history.append(event.get("payload", {}))
+                    steps_state[step_id] = {**existing, "replan_history": replan_history}
                 updated = True
 
         if updated and steps_state:
@@ -279,10 +292,21 @@ if quick_run:
 
         time.sleep(0.15)
 
-    # 最终渲染
+    # 最终渲染：status 在 run_metadata.status，不在 patch 顶层
     if final_result:
-        status = final_result.get("status", "unknown")
+        run_meta   = final_result.get("run_metadata") or {}
+        status     = run_meta.get("status", "unknown")
+        step_count = run_meta.get("step_count", "?")
         if status == "success":
-            status_bar.success(f"✅ 运行完成！run_id=`{run_id}`")
+            status_bar.success(
+                f"✅ 运行完成（validate_plan 通过）  ·  run_id=`{run_id}`  ·  共 {step_count} 步"
+            )
+        elif status == "partial":
+            status_bar.warning(
+                f"⚠️ 部分成功（有步骤最终失败）  ·  run_id=`{run_id}`"
+            )
         else:
-            status_bar.warning(f"⚠️ 运行结束，状态={status}，run_id=`{run_id}`")
+            status_bar.error(
+                f"❌ 运行失败（status={status}）  ·  run_id=`{run_id}`  ·  "
+                f"可能原因：step abort 或 validate_plan 未通过"
+            )

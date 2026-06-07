@@ -374,7 +374,7 @@ with left_col:
                 "overrides":   overrides,
                 "run_id":      st.session_state.get("last_run_id"),
                 "created_at":  datetime.now().isoformat(),
-                "result_status": (st.session_state.get("last_result") or {}).get("status"),
+                "result_status": ((st.session_state.get("last_result") or {}).get("run_metadata") or {}).get("status"),
             }
             target = EXPERIMENTS_DIR / f"{filename.strip()}.yaml"
             try:
@@ -491,15 +491,22 @@ with right_col:
         if run_error:
             status_placeholder.error(f"❌ 运行出错：{run_error}")
         elif final_result:
-            final_status = final_result.get("status", "unknown")
+            # status 在 run_metadata.status 里，不在 patch 顶层
+            run_meta = final_result.get("run_metadata") or {}
+            final_status = run_meta.get("status", "unknown")
+            step_count   = run_meta.get("step_count", "?")
             if final_status == "success":
                 status_placeholder.success(
-                    f"✅ 运行完成！`{resolved_run_id}`  ·  "
-                    f"⏱ {format_ms(final_result.get('total_duration_ms'))}"
+                    f"✅ 运行完成（validate_plan 通过）  ·  `{resolved_run_id}`  ·  共 {step_count} 步"
+                )
+            elif final_status == "partial":
+                status_placeholder.warning(
+                    f"⚠️ 部分成功（有步骤最终失败，但 validate_plan 通过）  ·  `{resolved_run_id}`"
                 )
             else:
-                status_placeholder.warning(
-                    f"⚠️ 运行结束，状态=**{final_status}**  ·  `{resolved_run_id}`"
+                status_placeholder.error(
+                    f"❌ 运行失败（status={final_status}）  ·  `{resolved_run_id}`  ·  "
+                    f"可能原因：step abort 或 validate_plan 未通过"
                 )
 
             # 最终完整渲染
@@ -519,7 +526,8 @@ with right_col:
         last_run_id = st.session_state.get("last_run_id")
 
         if last_result:
-            last_status = last_result.get("status", "unknown")
+            last_meta   = last_result.get("run_metadata") or {}
+            last_status = last_meta.get("status", "unknown")
             icon = STATUS_ICONS.get(last_status, "❓")
             status_placeholder.markdown(
                 f"{icon} **上次运行** `{last_run_id}` · 状态={last_status}"
