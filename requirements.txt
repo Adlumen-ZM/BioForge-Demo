@@ -1,43 +1,29 @@
-# ==================== 当前在用的包 ====================
-# openai 包版本更新（旧 extract_agent MVP 在用；新 template 统一走 LiteLLM，不直接 import openai）
-openai>=1.60.0
-
-PyMuPDF==1.24.0
-python-dotenv==1.0.1
+# ==================== 基础网络 ====================
+requests>=2.31.0
 httpx>=0.28.1
+
+# ==================== 配置与序列化 ====================
+python-dotenv==1.0.1
+pyyaml>=6.0
+pydantic>=2.6.0
+
+# ==================== PDF 处理 ====================
+PyMuPDF==1.24.0
 
 # ==================== AgentTemplate 层核心依赖 ====================
 
-# YAML 加载（plan.yaml / identity.yaml），agent_template 必须
-pyyaml>=6.0
-
-# LLM 调用层（provider-agnostic，ChatLiteLLM 来自 langchain-community）
+# LLM 调用层（provider-agnostic）
+openai>=1.60.0
 litellm>=1.82.0
-
-# PubMed 检索
-metapub>=0.5.0
-
-# 结构化输出
-instructor>=0.6.0
-pydantic>=2.6.0
 
 # LangGraph & LangChain
 langgraph>=0.5.4
-langchain-community>=0.2.0
-langchain-litellm>=0.1.0  # langchain-community>=0.3.0 将 ChatLiteLLM 迁移至此包
+langchain-core>=0.2.0
+langchain-litellm>=0.1.0
 
-# 数据库
-sqlmodel>=0.0.14
-sqlalchemy>=2.0          # Trace MVP: PostgresBackend 使用 SQLAlchemy Core（sqlmodel 已隐式依赖，此处显式声明）
-psycopg[binary]>=3.1     # Trace MVP: Postgres 驱动（psycopg3，与 psycopg2-binary 兼容旧连接串格式）
-
-# 可观测性
-langsmith>=0.1.4
-
-# ==================== 本版本新增的包（为测试github action） ====================
-numpy>=1.20.0
-# 第一次构建失败, 因为原来的requirements.txt有了, 但是现在把他显视化维护, 后面要注意拉更清晰的表单
-biopython>=1.84
+# ==================== 数据库 ====================
+sqlalchemy>=2.0
+psycopg[binary]>=3.1
 
 # ==================== 算子调优工具（scripts/debugger/ Streamlit UI） ====================
 streamlit>=1.35.0
