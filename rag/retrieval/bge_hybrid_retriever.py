@@ -17,14 +17,28 @@ logger = logging.getLogger(__name__)
 
 
 def _load_bge_model(model_dir: str, use_fp16: bool):
-    """懒加载 BGEM3FlagModel，避免未安装时顶层 import 崩溃。"""
+    """懒加载 BGEM3FlagModel，避免未安装时顶层 import 崩溃。
+    添加全局缓存，避免反复加载 4.5GB 模型。
+    """
+    cache_key = f"{model_dir}_{use_fp16}"
+    if cache_key in _BGE_MODEL_CACHE:
+        logger.debug("使用缓存的 BGE-M3 模型: %s", model_dir)
+        return _BGE_MODEL_CACHE[cache_key]
+
     try:
         from FlagEmbedding import BGEM3FlagModel  # noqa: PLC0415
     except ImportError as e:
         raise ImportError(
             "请先安装 FlagEmbedding：pip install FlagEmbedding"
         ) from e
-    return BGEM3FlagModel(model_dir, use_fp16=use_fp16)
+    model = BGEM3FlagModel(model_dir, use_fp16=use_fp16)
+    _BGE_MODEL_CACHE[cache_key] = model
+    logger.info("BGE-M3 模型加载完成: %s", model_dir)
+    return model
+
+
+# 全局模型缓存（跨 BGEHybridRetriever 实例共享）
+_BGE_MODEL_CACHE = {}
 
 
 class BGEHybridRetriever:

@@ -104,16 +104,11 @@ def pubmed_search(query: str, max_results: int = 20) -> dict[str, Any]:
     真实实现请在 backend/src/tools/shared/pubmed_search.py 中接入 metapub 或 Entrez API。
     """
     # TODO(tools负责人): 替换为真实 PubMed API 调用
-    # 示例真实实现：
-    #   from metapub import PubMedFetcher
-    #   fetch = PubMedFetcher()
-    #   pmids = fetch.pmids_for_query(query, retmax=max_results)
-    #   return {"paper_ids": pmids, "total_found": len(pmids)}
     stub_ids = [f"PMID{i:07d}" for i in range(1, min(max_results, 10) + 1)]
     return {
         "paper_ids": stub_ids,
         "total_found": len(stub_ids),
-        "_stub": True,  # 标记为 stub，便于测试断言
+        "_stub": True,
     }
 
 
@@ -128,9 +123,8 @@ def screen_paper(paper_id: str, criteria: str) -> dict[str, Any]:
     Returns:
         dict，包含 'relevant'（bool）和 'reason'（str）。
 
-    注意：v0.1 为 stub 实现。
+    注意：v0.1 为 stub 实现，下方会被真实 BM25 实现覆盖。
     """
-    # TODO(tools负责人): 替换为真实摘要获取 + 相关性判断逻辑
     return {
         "paper_id": paper_id,
         "relevant": True,
@@ -144,12 +138,12 @@ def screen_paper(paper_id: str, criteria: str) -> dict[str, Any]:
 # ─────────────────────────────────────────────
 
 _REGISTRY: dict[str, Any] = {
-    # ── stub tools（v0.1，供测试和缺少依赖时兜底）──
+    # ── stub tools（供测试和依赖缺失时兜底，下方条件块会覆盖为真实版）──
     "pubmed_search": pubmed_search,
-    "screen_paper":  screen_paper,   # BM25 stub（下方会被真实版覆盖）
+    "screen_paper":  screen_paper,
 }
 
-# ── 真实 screen_paper（rank-bm25 实现）──
+# ── 真实 screen_paper（rank-bm25 实现，替换 stub）──
 if _SCREEN_PAPER_LOADED and _real_screen_paper is not None:
     _REGISTRY["screen_paper"] = _real_screen_paper
 
@@ -169,16 +163,15 @@ if _RAG_TOOLS_LOADED:
 # ── test_agent 专属 mock tools（若加载成功则注册）──
 if _TEST_TOOLS_LOADED:
     _REGISTRY.update({
-        "mock_success":     mock_success,      # 永远成功，输出可配置
-        "mock_fail":        mock_fail,         # 永远失败，测 abort 路径
-        "mock_slow":        mock_slow,         # 模拟耗时，测 duration 监控
-        "mock_flaky":       mock_flaky,        # 前N次失败→成功，测 retry 逻辑
-        "mock_rich_output": mock_rich_output,  # 复杂嵌套输出，测 output_adapter 健壮性
-        # plan_deep_analysis 专属（多轮轮询 + validate_plan 失败测试）
-        "mock_literature_search": mock_literature_search,  # 分页检索，返回 has_more 信号
-        "mock_fetch_details":     mock_fetch_details,      # 异步任务，status=submitted→processing→complete
-        "mock_binding_analysis":  mock_binding_analysis,   # 单次调用，富嵌套输出
-        "mock_generate_report":   mock_generate_report,    # 生成报告，故意缺少 output_contract 字段
+        "mock_success":     mock_success,
+        "mock_fail":        mock_fail,
+        "mock_slow":        mock_slow,
+        "mock_flaky":       mock_flaky,
+        "mock_rich_output": mock_rich_output,
+        "mock_literature_search": mock_literature_search,
+        "mock_fetch_details":     mock_fetch_details,
+        "mock_binding_analysis":  mock_binding_analysis,
+        "mock_generate_report":   mock_generate_report,
     })
 
 

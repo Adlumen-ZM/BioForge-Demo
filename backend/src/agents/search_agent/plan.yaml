@@ -1,21 +1,78 @@
-# search_agent/plan.yaml
-# SearchAgent 的预定义 plan，三步式检索流程。
+﻿# search_agent/plan.yaml
+# SearchAgent 的预定义 plan，四步式检索流程。
 # plan_runner 按顺序执行，replanner 可在运行时修改内存中的 plan 对象（不回写此文件）。
 
-plan_id: "search_plan_v01"
+plan_id: "search_plan_v02"
 agent_name: "search_agent"
-version: "0.1"
+version: "1.0"
 
 steps:
+  - step_id: "task_understanding"
+    name: "任务理解"
+    instruction: |
+      深入理解研究目标，明确检索的核心问题和边界。
+
+      输入数据（来自 PipelineState 或用户输入）：
+        - research_objective: 研究目标描述（如 "FAE 肽段与 HAp 的吸附机制"）
+        - domain: 研究领域（生物矿化、牙科材料等）
+
+      理解要点：
+        1. 核心实体：识别研究涉及的主要生物实体（肽段、蛋白、矿物材料等）
+        2. 关系类型：理解实体间的相互作用关系（吸附、成核、抑制等）
+        3. 实验模型：识别研究的实验体系（体外、体内、模拟等）
+        4. 边界条件：明确检索的时间范围、语言、文献类型等限制
+
+      输出 JSON 格式：
+      {
+        "understood_objective": "<对研究目标的理解表述>",
+        "core_entities": ["<核心实体1>", "<核心实体2>", ...],
+        "relation_types": ["<关系类型1>", "<关系类型2>", ...],
+        "experimental_models": ["<实验模型1>", "<实验模型2>", ...],
+        "constraints": {
+          "time_range": "<时间范围或 null>",
+          "language": "<语言或 null>",
+          "literature_type": "<文献类型或 null>"
+        },
+        "understanding_summary": "<简短的理解总结，用于后续步骤参考>"
+      }
+    tools_required: []
+    success_criteria:
+      required_fields:
+        - "understood_objective"
+        - "core_entities"
+      min_count: {}
+    max_retries: 2
+    db_write_policy: "none"
+
   - step_id: "query_build"
     name: "构建检索式"
     instruction: |
-      根据研究目标，构建覆盖核心概念的 PubMed 检索式。
-      必须包含以下方面的同义词：
-        - 核心材料：HAp（hydroxyapatite）、calcium phosphate、biomineralization
-        - 调控因子：peptide、protein、amino acid、biomimetic
-        - 生物系统：bone、dentin、enamel、mineralization
-      输出 JSON 格式：{"query_string": "<PubMed 检索式>", "rationale": "<简短理由>"}
+      根据上一步的任务理解结果，构建覆盖核心概念的 PubMed 检索式。
+
+      输入数据（来自 task_understanding 步骤）：
+        - core_entities: 核心实体列表
+        - relation_types: 关系类型列表
+        - experimental_models: 实验模型列表
+
+      构建策略：
+        1. 将核心实体转换为 MeSH 术语和同义词
+        2. 使用布尔运算符组合检索词
+        3. 考虑截词符和模糊匹配
+        4. 覆盖以下方面的同义词：
+           - 核心材料：HAp（hydroxyapatite）、calcium phosphate、biomineralization
+           - 调控因子：peptide、protein、amino acid、biomimetic
+           - 生物系统：bone、dentin、enamel、mineralization
+
+      输出 JSON 格式：
+      {
+        "query_string": "<PubMed 检索式>",
+        "query_components": {
+          "main_concepts": ["<主要概念1>", "<主要概念2>", ...],
+          "synonyms_used": ["<同义词1>", "<同义词2>", ...],
+          "boolean_operators": "<使用的布尔运算符说明>"
+        },
+        "rationale": "<检索式构建的简短理由>"
+      }
     tools_required: []
     success_criteria:
       required_fields:
@@ -28,10 +85,21 @@ steps:
     name: "执行文献检索"
     instruction: |
       使用上一步生成的检索式（query_string）调用 pubmed_search 工具执行检索。
+
       要求：
         - max_results 设为 100
         - 将返回的 paper_ids 存入输出
-      输出 JSON 格式：{"candidate_ids": ["<PMID>", ...], "search_stats": {"total_found": <int>}}
+        - 记录检索的统计信息
+
+      输出 JSON 格式：
+      {
+        "candidate_ids": ["<PMID>", ...],
+        "search_stats": {
+          "total_found": <int>,
+          "retrieved_count": <int>,
+          "query_used": "<实际使用的检索式>"
+        }
+      }
     tools_required:
       - "pubmed_search"
     success_criteria:
@@ -46,7 +114,9 @@ steps:
     name: "去重与初步过滤"
     instruction: |
       对 candidate_ids 进行去重（排除重复 ID），并记录去重后的结果。
+
       当前阶段不做质量判断，只做 ID 级去重。
+
       输出 JSON 格式：
       {
         "candidate_paper_ids": ["<PMID>", ...],

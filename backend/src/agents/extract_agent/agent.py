@@ -1,64 +1,53 @@
-class MockExtractAgent:
-    """Offline extraction agent used by graph smoke tests."""
+"""
+backend/src/agents/extract_agent/agent.py
+ExtractAgent 入口函数 - 基于 AgentTemplate 架构
+"""
 
-    def run(self, input_data: dict) -> dict:
-        selected_paper = input_data.get("selected_paper") or {}
-        paper_ids = list(input_data.get("screened_paper_ids") or [])
-        paper_id = selected_paper.get("paper_id") or (paper_ids[0] if paper_ids else "mock-paper-001")
-        pdf_path = input_data.get("pdf_path") or selected_paper.get("pdf_path") or "fake.pdf"
-        pdf_name = input_data.get("pdf_name") or selected_paper.get("pdf_name") or pdf_path
-        record_id = f"{paper_id}-record-001"
+from pathlib import Path
+import os
 
-        return {
-            "ok": True,
-            "message": "mock extract success",
-            "extracted_record_ids": [record_id],
-            "extract_summary": "Mock extract produced 1 structured record.",
-            "extraction": {
-                "record_id": record_id,
-                "paper_id": paper_id,
-                "pdf_path": pdf_path,
-                "pdf_name": pdf_name,
-                "title": selected_paper.get("title") or "Mock Paper Title",
-                "doi": "10.0000/mock",
-                "summary_functions": ["adsorption"],
-            },
-        }
+from backend.src.agents.agent_template import AgentTemplate
+from backend.src.agents.agent_template.config import AgentTemplateConfig
+
+_AGENT_DIR = Path(__file__).parent
 
 
-class RealExtractAgent:
-    """Wrapper placeholder for the migrated real extract implementation."""
+def create_extract_agent(model: str = None) -> AgentTemplate:
+    """创建 extract_agent 实例。
 
-    def run(self, input_data: dict) -> dict:
-        selected_paper = input_data.get("selected_paper") or {}
-        pdf_path = input_data.get("pdf_path") or selected_paper.get("pdf_path")
+    ExtractAgent 负责从论文 PDF 文本中通过 LLM 抽取结构化信息。
 
-        if not pdf_path:
-            return {
-                "ok": False,
-                "message": "missing pdf_path for real extract_agent",
-                "extracted_record_ids": [],
-                "extraction": None,
-            }
+    Args:
+        model: LLM 模型名称，默认从环境变量 DEFAULT_LLM_MODEL 读取，
+               回退到 deepseek/deepseek-chat。
 
-        try:
-            from .text_agent import TextAgent
-        except Exception as exc:
-            return {
-                "ok": False,
-                "message": f"real extract_agent import failed: {exc}",
-                "extracted_record_ids": [],
-                "extraction": None,
-            }
+    Returns:
+        AgentTemplate 实例，可通过 run() 方法执行抽取流程
 
-        agent = TextAgent()
-        ok, error = agent.run(pdf_path)
-        return {
-            "ok": ok,
-            "message": "real extract success" if ok else error,
-            "extracted_record_ids": [],
-            "extraction": agent.last_result if ok else None,
-        }
+    Example:
+        agent = create_extract_agent()
+        result = agent.run(pipeline_state={"paper_texts": [...]})
 
-
-__all__ = ["MockExtractAgent", "RealExtractAgent"]
+    Note:
+        RAG 功能当前已禁用，等待 FlagEmbedding 依赖安装后启用。
+        启用方式：
+        1. 安装依赖: pip install FlagEmbedding
+        2. 取消 plan.yaml 中 RAG 步骤的注释
+        3. 取消下方 tools 参数的注释
+    """
+    model = model or os.getenv("DEFAULT_LLM_MODEL", "deepseek/deepseek-chat")
+    config = AgentTemplateConfig(
+        agent_name="extract_agent",
+        plan_path=_AGENT_DIR / "plan.yaml",
+        identity_path=_AGENT_DIR / "identity.yaml",
+        skills_dir=_AGENT_DIR / "skills",
+        model=model,
+        tools=[
+            "chunk_document",
+            "build_rag_index",
+            "retrieve_chunks",
+        ],
+        max_step_retries=2,
+        enable_trace=True,
+    )
+    return AgentTemplate(config)

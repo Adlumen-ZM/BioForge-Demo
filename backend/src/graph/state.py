@@ -79,13 +79,17 @@ class PipelineState(TypedDict, total=False):
     """候选文献的元数据列表（title/abstract/doi 等），由 search_agent 写入。"""
 
     search_summary: str
+    """search_agent 的运行摘要（不超过 200 字），由 output_adapter 生成。"""
 
     # ── Screen Agent 产出 ─────────────────────────────────────────────────
     screened_paper_ids: list[str]
+    """经相关性筛选后保留的文献 ID 列表，由 screen_agent 写入。"""
+
     selected_paper: dict[str, Any] | None
     """当前选中处理的单篇文献（screen_agent 写入，extract_agent 读取）。"""
 
     screen_summary: str
+    """screen_agent 的运行摘要，由 output_adapter 生成。"""
 
     # ── Extract Agent 产出 ────────────────────────────────────────────────
     extracted_papers: list[dict]
@@ -95,11 +99,16 @@ class PipelineState(TypedDict, total=False):
     """抽取失败的论文列表及错误原因，由 extract_agent 写入。"""
 
     extracted_record_ids: list[str]
+    """成功抽取并写入数据库的记录 ID 列表，由 graph 层写入（基于 extracted_papers）。"""
+
     extract_summary: str
+    """extract_agent 的运行摘要，由 output_adapter 生成。"""
+
     extraction: dict[str, Any] | None
     """单篇文献的结构化抽取结果。"""
 
     result: dict[str, Any] | None
+    """最终结果数据。"""
 
     # ── 文件资产与 PDF 下载（v0.1）────────────────────────────────────────
     paper_key: str | None
