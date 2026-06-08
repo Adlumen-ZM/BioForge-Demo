@@ -35,20 +35,18 @@ def create_extract_agent(model: str = None) -> AgentTemplate:
         2. 取消 plan.yaml 中 RAG 步骤的注释
         3. 取消下方 tools 参数的注释
     """
-    model = model or os.getenv("DEFAULT_LLM_MODEL", "minimax/MiniMax-M2.7-highspeed")
+    model = model or os.getenv("DEFAULT_LLM_MODEL", "deepseek/deepseek-chat")
     config = AgentTemplateConfig(
         agent_name="extract_agent",
         plan_path=_AGENT_DIR / "plan.yaml",
         identity_path=_AGENT_DIR / "identity.yaml",
         skills_dir=_AGENT_DIR / "skills",
         model=model,
-        # RAG 工具（待启用）
-        # tools=[
-        #     "chunk_document",    # 文档切块
-        #     "build_rag_index",  # Embedding 与建索引
-        #     "retrieve_chunks",  # RAG 召回
-        # ],
-        tools=[],  # 当前使用基础模式，无需工具
+        tools=[
+            "chunk_document",
+            "build_rag_index",
+            "retrieve_chunks",
+        ],
         max_step_retries=2,
         enable_trace=True,
     )

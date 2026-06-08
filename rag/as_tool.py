@@ -61,7 +61,7 @@ def chunk_document(
         }
     """
     try:
-        from rag_pipeline.ingestion.vision_parser import RAGFlowParser
+        from rag.ingestion.vision_parser import RAGFlowParser
 
         parser = RAGFlowParser()
         raw_chunks = parser.parse(pdf_path)

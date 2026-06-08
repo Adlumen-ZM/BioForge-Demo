@@ -17,11 +17,12 @@ htmlcov/
 coverage.xml
 
 # ====================
-# Virtual environments
+# Virtual environments / site-packages
 # ====================
 .venv/
 venv/
 env/
+libs/
 
 # ====================
 # Environment / secrets

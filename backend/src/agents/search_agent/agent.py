@@ -4,7 +4,9 @@ from backend.src.agents.agent_template.config import AgentTemplateConfig
 
 _AGENT_DIR = Path(__file__).parent
 
-def create_search_agent(model: str = "minimax/MiniMax-M2.7-highspeed") -> AgentTemplate:
+def create_search_agent(model: str = None) -> AgentTemplate:
+    import os
+    model = model or os.getenv("DEFAULT_LLM_MODEL", "deepseek/deepseek-chat")
     config = AgentTemplateConfig(
         agent_name="search_agent",
         plan_path=_AGENT_DIR / "plan.yaml",
