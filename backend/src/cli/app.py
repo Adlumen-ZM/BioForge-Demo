@@ -41,34 +41,62 @@ from backend.src.cli.session import CLISession
 console = Console()
 
 
-def print_banner(results: list[dict]) -> None:
-    """打印欢迎 banner（单一 Panel，符合技术方案 §10 规范）。
+_LOGO = r"""
+ ██████╗ ██╗ ██████╗ ███████╗ ██████╗ ██████╗  ██████╗ ███████╗
+ ██╔══██╗██║██╔═══██╗██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝
+ ██████╔╝██║██║   ██║█████╗  ██║   ██║██████╔╝██║  ███╗█████╗
+ ██╔══██╗██║██║   ██║██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝
+ ██████╔╝██║╚██████╔╝██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗
+ ╚═════╝ ╚═╝ ╚═════╝ ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝"""
 
-    Panel 内部结构：
-      - 上半部分：BioForge 标题 + 副标题 + 版本/模式
-      - 中间：Rule 分隔线（模拟 ├─────┤ 效果）
-      - 下半部分：System Status 各检测项（对齐，彩色）
+_HELIX = (
+    "  ·  ·○·  ·  ·○·  ·  ·○·  ·  ·○·  ·  ·○·  ·  ·○·  ·  ·○·",
+    "  ○·  ·  ·○·  ·  ·○·  ·  ·○·  ·  ·○·  ·  ·○·  ·  ·○·  ·  ",
+)
+
+
+def print_banner(results: list[dict]) -> None:
+    """打印大型生物风格 banner（Block ASCII logo + DNA 螺旋装饰 + 系统状态）。
+
+    结构：
+      - 大型 BioForge 块状 ASCII logo（蓝绿渐变）
+      - DNA 双螺旋装饰线
+      - 副标题 + 版本模式
+      - Rule 分隔线
+      - System Status 状态行（对齐，彩色）
+      - 底部提示行
 
     Args:
         results: 来自 run_system_check() 的检测结果列表。
     """
     mode = os.getenv("GRAPH_AGENT_MODE", "mock").upper()
 
-    # ── 上半部分：标题区 ─────────────────────────────────────────────────────
-    header = Text()
-    header.append("\n  BioForge\n", style="bold cyan")
-    header.append("  Agentic Framework for Biomedical Literature Mining\n")
-    header.append(f"  v0.1  {mode} Mode\n", style="dim")
+    # ── 大型 Logo ─────────────────────────────────────────────────────────────
+    logo = Text()
+    for line in _LOGO.split("\n"):
+        logo.append(line + "\n", style="bold cyan")
 
-    # ── 中间：分隔线 ─────────────────────────────────────────────────────────
+    # ── DNA 双螺旋装饰（两行交错） ─────────────────────────────────────────────
+    helix = Text()
+    helix.append(_HELIX[0] + "\n", style="green")
+    helix.append(_HELIX[1] + "\n", style="cyan")
+
+    # ── 副标题 ────────────────────────────────────────────────────────────────
+    subtitle = Text()
+    subtitle.append(
+        "  Agentic Framework for Biomedical Literature Mining  ",
+        style="bold white",
+    )
+    subtitle.append(f"  v0.1 · {mode} Mode\n", style="dim cyan")
+
+    # ── 分隔线 ────────────────────────────────────────────────────────────────
     divider = Rule(style="dim blue")
 
-    # ── 下半部分：系统状态区 ─────────────────────────────────────────────────
+    # ── 系统状态 ──────────────────────────────────────────────────────────────
     status = Text()
     status.append("\n  System Status\n", style="bold")
 
-    # 名称对齐宽度
-    name_map = {
+    name_map  = {
         "LLM":        "LLM",
         "TraceDB":    "Trace DB",
         "BizDB":      "Business DB",
@@ -86,10 +114,10 @@ def print_banner(results: list[dict]) -> None:
         status.append(f"   {icon}  {label}  ", style="")
         status.append(detail + "\n", style=color)
 
-    status.append("")  # 底部留一行空白
+    status.append("")
 
     # ── 组合为单一 Panel ──────────────────────────────────────────────────────
-    content = Group(header, divider, status)
+    content = Group(logo, helix, subtitle, divider, status)
     console.print()
     console.print(Panel(content, border_style="blue", padding=(0, 1)))
     console.print("  [dim]输入 /help 查看命令  ·  /demo 一键体验  ·  /quit 退出[/dim]")
