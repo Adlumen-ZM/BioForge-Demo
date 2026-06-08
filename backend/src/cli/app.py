@@ -148,10 +148,15 @@ def main():
     # ── 步骤 2：Banner ────────────────────────────────────────────────────────
     print_banner(results)
 
-    # ── 步骤 3：初始化会话 ────────────────────────────────────────────────────
+    # ── 步骤 3：初始化会话 + TraceManager ────────────────────────────────────
     session = CLISession()
     run_id  = session.new_run_id()
     console.print(f"[dim]Session: {run_id}  ·  Thread: {session.thread_id}[/dim]\n")
+
+    # TraceManager：file sink + CLI buffer sink，目录 data/runs/YYYYMMDD/{run_id}/
+    from backend.src.db_access.trace.trace_manager import TraceManager, set_manager
+    trace_manager = TraceManager.create(run_id=run_id)
+    set_manager(trace_manager)
 
     # ── 步骤 4-6：构建 graph + Guide 三步对话 ─────────────────────────────────
     # MemorySaver 提供 interrupt/resume 所需的检查点支持（进程内有效）
@@ -174,6 +179,7 @@ def main():
             final_state = run_pipeline_view(
                 graph=graph,
                 final_state=final_state,
+                trace_manager=trace_manager,   # 传入 manager，Live 面板显示 trace 日志
             )
 
             # 记录历史
@@ -193,6 +199,13 @@ def main():
     except Exception as e:
         console.print(f"\n[red]错误：{e}[/red]")
         session.add_history({"run_id": run_id, "status": "error", "summary": str(e)})
+
+    finally:
+        # 关闭 trace sink（刷写文件句柄）
+        try:
+            trace_manager.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

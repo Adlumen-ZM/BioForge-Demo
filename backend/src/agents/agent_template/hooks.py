@@ -362,12 +362,33 @@ class TraceHook:
         self._write(event)
 
     def _write(self, event: TraceEvent) -> None:
-        """将事件写入后端。try/except 保证 trace 失败绝不影响主流程。"""
+        """将事件写入后端，并同时路由到新 trace_manager（若已初始化）。
+
+        两条路径完全独立，任一失败不影响另一条和主流程。
+        """
+        # ── 旧路径：TraceBackend（NullBackend/PostgresBackend）────────────────
         try:
             self.backend.write(event)
         except Exception as e:
-            # TraceError 只在此处打印，不向上传播
             print(f"[TraceError] 写入 trace 失败（event_type={event.event_type}）：{e}")
+
+        # ── 新路径：TraceManager（FileJsonlSink + CLIConsoleSink）──────────────
+        # 将 TraceEvent 字段映射到 trace_manager.record() 的参数格式
+        try:
+            from backend.src.db_access.trace.trace_manager import get_manager
+            mgr = get_manager()
+            if mgr is not None:
+                mgr.record(
+                    event_type  = event.event_type,
+                    stage       = event.stage,
+                    status      = event.status or "running",
+                    payload     = event.payload,
+                    duration_ms = event.duration_ms,
+                    agent_name  = event.stage,
+                    step_id     = event.step_id or "",
+                )
+        except Exception:
+            pass  # trace_manager 路由失败不影响主流程
 
 
 def _now_ms() -> float:

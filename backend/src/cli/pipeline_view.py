@@ -1,18 +1,24 @@
 """
 backend/src/cli/pipeline_view.py — 流水线执行进度面板
 
-职责：使用 rich.Live 实时显示 Search → Screen → Extract 三阶段的执行进度：
-  - 实时更新每个 node 的状态（pending / running / success / error）
-  - 显示执行时间、已处理条目数等指标
-  - 处理 CTRL+C 优雅退出
+位置：backend/src/cli/
+依赖：rich（Live/Table/Group/Rule/Text）、trace_manager（可选）
+职责：
+  - 使用 rich.Live 实时显示 Search → Screen → Extract 进度
+  - 进度表格下方嵌入 trace 日志区（读取 trace_manager.cli_log_buffer）
+  - CTRL+C 优雅退出
 
-核心类和函数：
-  - NodeStatus: 节点状态枚举
-  - NodeMetrics: 单个节点的度量数据（状态、时间、错误等）
-  - build_pipeline_table() → rich.Table
-    生成进度表格
-  - run_pipeline_view() → final_state
-    在 rich.Live 中运行流水线，实时更新表格
+Live 面板结构：
+  ┌─────────────────────────┐
+  │ Pipeline Progress Table  │  ← 节点状态/进度/耗时
+  │─────────────────────────│  ← Rule 分隔
+  │  [SEARCH] ▶ start        │  ← trace 日志区（最近 8 条）
+  │  [SEARCH] candidates: 128│
+  └─────────────────────────┘
+
+trace_manager 集成：
+  run_pipeline_view(graph, final_state, trace_manager=None)
+  若传入 trace_manager，从 manager.cli_log_buffer 读取日志行嵌入面板。
 """
 
 from __future__ import annotations
@@ -23,9 +29,11 @@ from enum import Enum
 from typing import Any
 from time import sleep
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
+from rich.rule import Rule
 from rich.table import Table
+from rich.text import Text
 
 console = Console()
 
@@ -133,108 +141,163 @@ def build_pipeline_table(metrics: dict[str, NodeMetrics]) -> Table:
     return table
 
 
-def run_pipeline_view(graph: Any, final_state: dict[str, Any]) -> dict[str, Any]:
-    """在进度面板中运行流水线（search → screen → extract）。
-
-    流程：
-      1. 初始化各节点的度量数据
-      2. 使用 rich.Live 实时显示进度表格
-      3. 依次执行 search/screen/extract 节点
-      4. 每个节点完成后更新其状态和指标
-      5. 异常或用户中断时优雅退出
+def _build_live_renderable(
+    metrics:    dict[str, "NodeMetrics"],
+    log_buffer: list[str] | None = None,
+    max_log:    int = 8,
+) -> Any:
+    """构造 rich.Live 的渲染内容：进度表格 + 可选的 trace 日志区。
 
     Args:
-        graph: 编译后的 LangGraph StateGraph
-        final_state: Guide Agent 完成后的最终状态
+        metrics:    节点度量数据 dict。
+        log_buffer: trace_manager.cli_log_buffer，None 时不显示日志区。
+        max_log:    最多显示最近 N 条日志。
 
     Returns:
-        final_state：流水线执行完毕后的最终状态字典
+        rich.Table（无日志）或 rich.console.Group（有日志）。
     """
+    table = build_pipeline_table(metrics)
+    if not log_buffer:
+        return table
+
+    log_text = Text()
+    for line in log_buffer[-max_log:]:
+        log_text.append(f"  {line}\n", style="dim")
+
+    return Group(table, Rule(style="dim"), log_text)
+
+
+def run_pipeline_view(
+    graph:         Any,
+    final_state:   dict[str, Any],
+    trace_manager: Any = None,
+) -> dict[str, Any]:
+    """在 rich.Live 进度面板中运行流水线（Search → Screen → Extract）。
+
+    若传入 trace_manager，从 manager.cli_log_buffer 读取 trace 日志，
+    嵌入到进度表格下方展示，避免 Live 独占终端与 trace 输出冲突。
+
+    Args:
+        graph:         编译后的 LangGraph StateGraph。
+        final_state:   Guide Agent 完成后的最终状态。
+        trace_manager: 可选，TraceManager 实例（含 cli_log_buffer）。
+
+    Returns:
+        final_state：流水线执行完毕后的最终状态字典。
+    """
+    from backend.src.db_access.trace.trace_manager import record as trace_record
+
     # ── 初始化各节点的度量数据 ──────────────────────────────────────────────
     metrics = {
-        "guide": NodeMetrics("guide", NodeStatus.SUCCESS),
-        "search": NodeMetrics("search", NodeStatus.PENDING),
-        "screen": NodeMetrics("screen", NodeStatus.PENDING),
+        "guide":   NodeMetrics("guide",   NodeStatus.SUCCESS),
+        "search":  NodeMetrics("search",  NodeStatus.PENDING),
+        "screen":  NodeMetrics("screen",  NodeStatus.PENDING),
         "extract": NodeMetrics("extract", NodeStatus.PENDING),
     }
 
-    config = {"configurable": {"thread_id": final_state.get("thread_id", "")}}
+    log_buffer = trace_manager.cli_log_buffer if trace_manager else None
 
     console.print()
     console.print("[bold blue]▶ 启动流水线（Search → Screen → Extract）[/bold blue]")
     console.print()
 
+    trace_record("pipeline_started", stage="pipeline", run_id=final_state.get("run_id", ""))
+
     try:
-        # ── 使用 rich.Live 实时显示进度表格 ────────────────────────────────
         with Live(
-            build_pipeline_table(metrics),
-            refresh_per_second=2,
+            _build_live_renderable(metrics, log_buffer),
+            refresh_per_second=4,
             console=console,
         ) as live:
+
+            def refresh():
+                live.update(_build_live_renderable(metrics, log_buffer))
+
             # ── Step 1: Search 节点 ──────────────────────────────────────────
-            metrics["search"].status = NodeStatus.RUNNING
+            metrics["search"].status     = NodeStatus.RUNNING
             metrics["search"].start_time = datetime.now()
             metrics["search"].items_total = 10
+            trace_record("node_started", stage="search_node", node_name="search_node")
+            refresh()
 
             try:
-                # 模拟 search 执行进度（实际版本：调用 graph.invoke）
                 for i in range(1, 11):
                     metrics["search"].items_processed = i
-                    live.update(build_pipeline_table(metrics))
-                    sleep(0.1)  # 模拟处理延迟
+                    refresh()
+                    sleep(0.1)
 
-                # search 完成
-                metrics["search"].status = NodeStatus.SUCCESS
+                metrics["search"].status   = NodeStatus.SUCCESS
                 metrics["search"].end_time = datetime.now()
+                trace_record(
+                    "search_results_collected",
+                    stage="search_node",
+                    payload={"candidate_count": metrics["search"].items_total},
+                )
+                trace_record("node_finished", stage="search_node",
+                             duration_ms=metrics["search"].elapsed_seconds() * 1000)
 
             except Exception as e:
-                metrics["search"].status = NodeStatus.ERROR
+                metrics["search"].status    = NodeStatus.ERROR
                 metrics["search"].error_msg = str(e)
-                metrics["search"].end_time = datetime.now()
+                metrics["search"].end_time  = datetime.now()
+                trace_record("node_failed", stage="search_node",
+                             status="failed", payload={"error": str(e)})
 
-            live.update(build_pipeline_table(metrics))
+            refresh()
 
             # ── Step 2: Screen 节点 ──────────────────────────────────────────
-            metrics["screen"].status = NodeStatus.RUNNING
+            metrics["screen"].status     = NodeStatus.RUNNING
             metrics["screen"].start_time = datetime.now()
             metrics["screen"].items_total = metrics["search"].items_total
+            trace_record("node_started", stage="screen_node", node_name="screen_node")
+            refresh()
 
             try:
                 for i in range(1, metrics["screen"].items_total + 1):
                     metrics["screen"].items_processed = i
-                    live.update(build_pipeline_table(metrics))
+                    refresh()
                     sleep(0.1)
 
-                metrics["screen"].status = NodeStatus.SUCCESS
+                metrics["screen"].status   = NodeStatus.SUCCESS
                 metrics["screen"].end_time = datetime.now()
+                trace_record("node_finished", stage="screen_node",
+                             duration_ms=metrics["screen"].elapsed_seconds() * 1000)
 
             except Exception as e:
-                metrics["screen"].status = NodeStatus.ERROR
+                metrics["screen"].status    = NodeStatus.ERROR
                 metrics["screen"].error_msg = str(e)
-                metrics["screen"].end_time = datetime.now()
+                metrics["screen"].end_time  = datetime.now()
+                trace_record("node_failed", stage="screen_node",
+                             status="failed", payload={"error": str(e)})
 
-            live.update(build_pipeline_table(metrics))
+            refresh()
 
             # ── Step 3: Extract 节点 ─────────────────────────────────────────
-            metrics["extract"].status = NodeStatus.RUNNING
+            metrics["extract"].status     = NodeStatus.RUNNING
             metrics["extract"].start_time = datetime.now()
             metrics["extract"].items_total = metrics["screen"].items_total
+            trace_record("node_started", stage="extract_node", node_name="extract_node")
+            refresh()
 
             try:
                 for i in range(1, metrics["extract"].items_total + 1):
                     metrics["extract"].items_processed = i
-                    live.update(build_pipeline_table(metrics))
+                    refresh()
                     sleep(0.1)
 
-                metrics["extract"].status = NodeStatus.SUCCESS
+                metrics["extract"].status   = NodeStatus.SUCCESS
                 metrics["extract"].end_time = datetime.now()
+                trace_record("node_finished", stage="extract_node",
+                             duration_ms=metrics["extract"].elapsed_seconds() * 1000)
 
             except Exception as e:
-                metrics["extract"].status = NodeStatus.ERROR
+                metrics["extract"].status    = NodeStatus.ERROR
                 metrics["extract"].error_msg = str(e)
-                metrics["extract"].end_time = datetime.now()
+                metrics["extract"].end_time  = datetime.now()
+                trace_record("node_failed", stage="extract_node",
+                             status="failed", payload={"error": str(e)})
 
-            live.update(build_pipeline_table(metrics))
+            refresh()
 
         # ── 流水线完成摘要 ──────────────────────────────────────────────────
         total_time = sum(
@@ -247,20 +310,30 @@ def run_pipeline_view(graph: Any, final_state: dict[str, Any]) -> dict[str, Any]
             1 for m in metrics.values() if m.status == NodeStatus.ERROR
         )
 
+        trace_record(
+            "pipeline_finished",
+            stage="pipeline",
+            status="success",
+            payload={"success_count": success_count, "error_count": error_count, "total_seconds": round(total_time, 1)},
+        )
         console.print()
         console.print(f"[bold green]✅ 流水线执行完成[/bold green]")
         console.print(
             f"  总耗时: {total_time:.1f}s  |  成功: {success_count}  |  失败: {error_count}"
         )
+        if trace_manager:
+            run_dir = str(trace_manager.run_dir)
+            console.print(f"  [dim]Trace: {run_dir}/trace/events.jsonl[/dim]")
         console.print()
 
     except KeyboardInterrupt:
         console.print("[red]\\n⏸ 流水线已中止（用户中断）[/red]")
-        # 标记正在运行的节点为错误状态
+        trace_record("pipeline_failed", stage="pipeline", status="failed",
+                     payload={"reason": "user_interrupted"})
         for m in metrics.values():
             if m.status == NodeStatus.RUNNING:
-                m.status = NodeStatus.ERROR
+                m.status    = NodeStatus.ERROR
                 m.error_msg = "User interrupted"
-                m.end_time = datetime.now()
+                m.end_time  = datetime.now()
 
     return final_state
