@@ -60,14 +60,27 @@ backend/src/
 │   ├── pipeline.py          ← build_graph()，StateGraph（guide→search→screen→extract）
 │   ├── factory.py           ← _AGENTS dict，get_agent()
 │   └── nodes.py             ← guide_node / search_node / screen_node / extract_node
-├── cli/                     ← 对话式 CLI（新增，Step 08）
+├── cli/                     ← 对话式 CLI（Step 08-09 完成）
 │   ├── __init__.py          ← 导出 main()
-│   ├── __main__.py          ← CLI 入口（python -m backend.src.cli）
-│   ├── app.py               ← 10 步编排流程（system_check → banner → guide → pipeline）
-│   ├── system_check.py      ← 环境检测（LLM/DB/Checkpoint）
-│   ├── session.py           ← CLISession（run_id/thread_id 管理）
-│   ├── conversation.py      ← 三步中断处理（wait_for_ok）
-│   └── pipeline_view.py     ← 流水线进度面板（rich.Live）
+│   ├── __main__.py          ← 入口点（python -m backend.src.cli [--check-only]）
+│   ├── app.py               ← 10 步编排流程：
+│   │                            1-2. system_check + banner 显示
+│   │                            3. 初始化 CLISession
+│   │                            4-6. 三步 interrupt 对话
+│   │                            7-9. 流水线执行（search/screen/extract）
+│   │                            10. REPL 交互模式（规划中）
+│   ├── system_check.py      ← 环境检测（5 项：LLM/TraceDB/BizDB/Mode/Checkpoint）
+│   ├── session.py           ← CLISession 状态管理（run_id/thread_id/历史）
+│   ├── conversation.py      ← 三步 interrupt 对话处理：
+│   │                            - wait_for_ok(): 确认点阻塞
+│   │                            - _render_task_panel(): 任务描述面板
+│   │                            - _render_schema_table(): 字段表格
+│   │                            - _render_criteria_panel(): 过滤规则面板
+│   │                            - run_guide_conversation(): 完整三步流程
+│   └── pipeline_view.py     ← 流水线实时进度面板：
+│                                - NodeStatus/NodeMetrics: 状态和度量
+│                                - build_pipeline_table(): rich.Table 构造
+│                                - run_pipeline_view(): rich.Live 实时更新
 ├── config/                  ← 配置层（TODO）
 └── db_access/
     ├── trace/               ← Trace 数据库（hooks.py 替代旧 trace_logger.py）
@@ -120,22 +133,58 @@ cd backend && python -m pytest tests/test_agent_template.py -v
 ## Environment Variables（.env）
 
 ```env
-# LLM（填写你实际使用的供应商 key，LiteLLM 自动读取）
-MINIMAX_API_KEY=your_key_here
-MINIMAX_GROUP_ID=your_group_id_here
-# 或：OPENAI_API_KEY=...  ANTHROPIC_API_KEY=...
+# ── LLM 配置 ──────────────────────────────────────────────────────────────
+# 填写实际使用的供应商 key，LiteLLM 自动识别
+OPENAI_API_KEY=sk_...
+# MINIMAX_API_KEY=your_key_here
+# ANTHROPIC_API_KEY=...
 
-# 可选：指定默认模型（供 run_minimal_agent.py 使用）
-DEFAULT_LLM_MODEL=minimax/MiniMax-M2.7-highspeed
+# 可选：默认模型（供脚本和 CLI 使用）
+DEFAULT_LLM_MODEL=openai/gpt-4o
 
-# Database（LangGraph checkpoint，与 trace 无关）
-LANGGRAPH_CHECKPOINT_DB_URL=postgresql://bioforge:password@localhost:5432/bioforge
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=bioforge
-POSTGRES_PASSWORD=your_password
-POSTGRES_DB=bioforge
+# ── LangGraph 检查点数据库 ───────────────────────────────────────────────
+# 用于 interrupt/resume 支持（与 trace 库分离）
+LANGGRAPH_CHECKPOINT_DB_URL=sqlite:///./data/demo_checkpoint.db
+# LANGGRAPH_CHECKPOINT_DB_URL=postgresql://bioforge:pass@localhost/bioforge
+
+# ── 业务数据库 ──────────────────────────────────────────────────────────
+DATABASE_URL=postgresql://bioforge:pass@localhost/bioforge
+BIZ_DB_PATH=./data/hap_v01.db  # SQLite 备选
+
+# ── Trace 数据库 ────────────────────────────────────────────────────────
+TRACE_DB_URL=sqlite:///./data/hap_trace.db
+
+# ── CLI 配置 ─────────────────────────────────────────────────────────────
+# Guide Agent 运行模式：mock（固定输出）/ real（真实 LLM 调用）
+GRAPH_AGENT_MODE=mock
+
+# ── 其他 ────────────────────────────────────────────────────────────────
+PYTHONUNBUFFERED=1  # 日志实时刷新
 ```
+
+## Running CLI
+
+```bash
+# 本地启动（需 .env 配置）
+python -m backend.src.cli
+
+# 仅检查环境（用于 CI）
+python -m backend.src.cli --check-only
+
+# Docker 启动（交互模式）
+docker-compose run pepclaw python -m backend.src.cli
+
+# Docker 检查环境
+docker-compose run pepclaw python -m backend.src.cli --check-only
+```
+
+CLI 10 步流程：
+1. System Check — 检测 LLM/DB/Checkpoint 等
+2. Banner — 显示系统状态
+3. Session Init — 生成 run_id/thread_id
+4-6. Guide Conversation — 三步 interrupt 对话（任务/字段/规则）
+7-9. Pipeline — 流水线执行进度（Search/Screen/Extract）
+10. REPL — 交互式查询结果（规划中）
 
 ## Running Tests
 
