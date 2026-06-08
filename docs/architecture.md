@@ -58,7 +58,13 @@ AgentTemplate.run()
            │                  └─ create_react_agent(ChatLiteLLM, tools, state_modifier)
            │                         └─ ReAct 循环（LangGraph prebuilt）
            │      ok = validator.validate_step(result, step)   ← 纯规则，不调 LLM
-           │      [失败] replanner.decide() → retry / abort
+           │      [失败] replanner.decide() → RETRY / MODIFY_STEP / ABORT
+           │              ├─ RETRY：原指令重试（rule_only 模式或未达阈值）
+           │              ├─ MODIFY_STEP：LLM 改写 instruction 后重试
+           │              │      hook.on_step_end(failed)       ← trace 固定位置 3
+           │              │      hook.on_step_replanned(...)    ← trace 固定位置 3.5（新增）
+           │              │      plan.steps[i] = updated_step  ← 只改内存，不写 YAML
+           │              └─ ABORT：终止整个 run
            │      hook.on_step_end(step, result)              ← trace 固定位置 3
            │      # TODO(graph层): db_write_policy 扩展点（非 template 范围）
            │
@@ -77,7 +83,12 @@ plan_runner → TraceHook → TraceBackend（抽象）
                                └─ PostgresBackend（未来：写 trace 事件表）
 ```
 
-TraceEvent 结构：`run_id / agent_name / event_type / step_id / payload / status / duration_ms`
+TraceEvent 结构：`run_id / agent_run_id / stage / event_type / step_id / payload / status / duration_ms`
+
+**event_type 合法值（AgentTemplate 层）：**
+- `plan_start` / `plan_end` — plan 级事件
+- `step_start` / `step_end` — step 级事件（含重试时每次都写）
+- `step_replanned` — MODIFY_STEP 决策后写入，payload 含 original/new instruction、replan_reason
 
 替换后端时 template 代码零改动：
 ```python
@@ -112,6 +123,27 @@ schemas.py   errors.py   stopping.py        ← 无依赖（最底层）
                │
          template_agent.py                  ← 依赖以上全部
 ```
+
+## Replan 策略
+
+`AgentTemplateConfig` 通过两个字段控制 step 失败后的行为：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `replan_strategy` | `"rule_only"` | `rule_only`：只做 RETRY/ABORT；`llm_on_exhaustion`：达到阈值后调 LLM 改写 instruction |
+| `replan_threshold` | `1` | retry_count 达到此值时升级到 LLM 修改（仅 `llm_on_exhaustion` 有效） |
+
+**两阶段决策（示例：threshold=1, max_step_retries=2）：**
+```
+第1次失败 → retry_count=0 < threshold=1  → RETRY（原指令）
+第2次失败 → retry_count=1 >= threshold=1 → MODIFY_STEP（LLM 改写指令）→ step_replanned 事件
+第3次失败 → retry_count=2 >= max=2       → ABORT
+```
+
+**关键不变量：**
+- `rule_only`（默认）时行为与 v0.1 完全一致，零回归
+- LLM 改写失败时静默降级为普通 RETRY，主流程不感知
+- `plan.yaml` 永远不变，MODIFY_STEP 只修改内存中的 Plan 对象
 
 ## 业务数据库写入（非 AgentTemplate 范围）
 

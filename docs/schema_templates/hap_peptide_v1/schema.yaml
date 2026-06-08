@@ -1,0 +1,1285 @@
+schema_version: hap_peptide_v1
+template:
+  template_id: hap_peptide_v1
+  name: HAp interaction peptide extraction template
+  domain: biomineralization_peptide
+  status: draft_freeze_candidate
+  created_for: Fudan-BioForge
+  description: 用于 HAp 相互作用肽段文献结构化抽取的逻辑字段模板。采用 paper → paper_entity_record → record_function → function_assay_evidence 四层主链，并新增
+    entity_component 支持复杂对象表达。
+design_principles:
+- 逻辑字段模板面向 Agent、人工标注和评估，不等同于 PostgreSQL 物理表。
+- 物理业务库可采用更规范化的 schema；本模板通过 physical_mapping 与物理库连接。
+- 所有枚举字段必须优先从 enum_groups 中选择；无法覆盖时使用 other/unclear 并在 curator_note 中说明。
+- Agent 不直接写物理业务表；输出 extraction_package 后由 db_access/business 写入服务执行幂等持久化。
+- source evidence 优先保留结构化字段；text_to_* 为人读聚合展示字段。
+enum_groups:
+  full_text_availability:
+  - open_access
+  - subscription
+  - preprint
+  - unknown
+  retrieval_source:
+  - pubmed
+  - crossref
+  - manual_entry
+  - agent_crawl
+  sequence_status:
+  - explicit
+  - partial
+  - not_reported
+  - backtrace_required
+  sequence_source_type:
+  - ref
+  - genbank
+  - uniprot
+  - suppl
+  - patent
+  - database
+  - other
+  entity_type:
+  - single_peptide
+  - fusion_peptide
+  - chimeric_peptide
+  - protein_fragment
+  - full_protein
+  - modified_peptide
+  - other
+  design_source:
+  - natural_derived
+  - rational_design
+  - phage_display
+  - computational
+  - synthetic
+  - unclear
+  entity_carrier_type:
+  - hydrogel
+  - protein_matrix
+  - polysaccharide_matrix
+  - coating
+  - scaffold
+  - composite
+  - other
+  - unclear
+  - none
+  application_form:
+  - free_peptide
+  - coated
+  - carrier_system
+  - multiple
+  - unclear
+  target_material:
+  - HAp
+  - collagen
+  - ACP
+  - other
+  - not_reported
+  - unclear
+  target_substrate:
+  - enamel
+  - dentin
+  - bone
+  - mineral_surface
+  - in_vitro_crystal
+  - other
+  - not_reported
+  - unclear
+  function_layer:
+  - binding
+  - kinetics
+  - crystallography
+  - protection
+  - biology
+  - other
+  function_label:
+  - adsorption
+  - localization
+  - ion_capture
+  - nucleation
+  - mineral_deposition
+  - crystal_growth_promotion
+  - phase_stabilization
+  - phase_transformation_promotion
+  - crystal_growth_inhibition
+  - crystal_orientation_modulation
+  - crystal_morphology_modulation
+  - anti_demineralization
+  - antimicrobial
+  - cell_adhesion_promotion
+  - other
+  evidence_level:
+  - in_vitro
+  - ex_vivo
+  - animal_in_vivo
+  - clinical
+  - in_silico
+  - unclear
+  section_path:
+  - Abstract
+  - Introduction
+  - Methods
+  - Results
+  - Discussion
+  - Conclusion
+  - Supplementary
+  trace_status:
+  - complete
+  - partial
+  - missing
+  - disputed
+  additive_system_type:
+  - free_in_solution
+  - hydrogel
+  - protein_matrix
+  - polysaccharide_matrix
+  - coating
+  - scaffold
+  - composite
+  - other
+  - unclear
+  - none
+  delivery_mode:
+  - free_solution
+  - surface_coating
+  - sustained_release
+  - immobilized
+  - pretreatment
+  - co_assembly
+  - other
+  - unclear
+  assay_category:
+  - binding_affinity
+  - surface_localization
+  - retention_test
+  - crystal_structure
+  - mineral_morphology
+  - elemental_composition
+  - molecular_composition
+  - mechanical_property
+  - mineral_quantity
+  - lesion_morphology
+  - biological_response
+  - in_vivo_efficacy
+  - simulation
+  - other
+  validation_method:
+  - CLSM
+  - fluorescence_microscopy
+  - micro-CT
+  - nanoindentation
+  - SEM
+  - TEM
+  - AFM
+  - XRD
+  - FTIR
+  - EDX
+  - ICP-OES
+  - SPR
+  - ITC
+  - ELISA
+  - MTT
+  - molecular_docking
+  - MD_simulation
+  - other
+  - unclear
+  location_type:
+  - summary
+  - detailed
+  - figure_legend
+  - supplementary
+  component_type:
+  - functional_module
+  - linker
+  - tag
+  - protein_fragment
+  - modification
+  - carrier
+  - other
+  modification_category:
+  - post_translational
+  - chemical_conjugation
+  - non_natural_aa
+  - terminal_modification
+  - cross_linking
+  - other
+  fragment_derivation_type:
+  - n_terminal
+  - c_terminal
+  - internal
+  - full_length
+logical_tables:
+  paper:
+    description: 论文主表；1 行 = 1 篇论文，存储论文元数据并作为外层索引。
+    record_granularity: one row per paper
+    primary_key: paper_id
+    id_rule: Pnnnnnn，例如 P000001
+    fields:
+      paper_id:
+        type: string
+        required: true
+        description: 论文在系统内唯一编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: paper
+          column: paper_id
+        rule_summary: 系统生成，格式 Pnnnnnn，作为其他逻辑表外键。
+      doi:
+        type: string
+        required: true
+        description: 论文 DOI。
+        source: metadata_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_identifier
+          column: identifier_value
+          condition:
+            identifier_type: doi
+        rule_summary: 从 PubMed/CrossRef/原文提取；录入前去重；无 DOI 时由人工处理。
+      pmid:
+        type: string
+        required: false
+        description: PubMed ID。
+        source: metadata_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_identifier
+          column: identifier_value
+          condition:
+            identifier_type: pmid
+        rule_summary: 仅 PubMed 收录论文填写。
+      title:
+        type: string
+        required: true
+        description: 论文完整标题。
+        source: metadata_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper
+          column: title
+        rule_summary: 保留原始大小写和标点。
+      journal_title:
+        type: string
+        required: true
+        description: 期刊标题。
+        source: metadata_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper
+          column: journal_title
+        rule_summary: 优先 PubMed 标准刊名/缩写；不确定时原文刊名。
+      publication_year:
+        type: integer
+        required: true
+        description: 出版年份。
+        source: metadata_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper
+          column: publication_year
+        rule_summary: 四位数字；在线预出版按预出版年份并备注。
+      abstract:
+        type: text
+        required: false
+        description: 摘要全文。
+        source: metadata_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper
+          column: abstract
+        rule_summary: 去除控制字符；结构化摘要可保留段落标记。
+      keywords:
+        type: list[string]
+        required: false
+        description: 作者关键词。
+        source: metadata_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_keyword
+          column: keyword
+        rule_summary: 可在 v1 作为逻辑字段；物理库可通过扩展表或 JSON 存储。
+      full_text_availability:
+        type: enum
+        required: true
+        description: 全文可获取状态。
+        source: metadata_or_agent
+        participate_in_eval: true
+        enum: full_text_availability
+        default: unknown
+        physical_mapping:
+          table: paper
+          column: full_text_availability_id
+        rule_summary: open_access/subscription/preprint/unknown。
+      retrieval_source:
+        type: enum
+        required: true
+        description: 元数据来源。
+        source: system_or_agent
+        participate_in_eval: true
+        enum: retrieval_source
+        physical_mapping:
+          table: paper
+          column: retrieval_source_id
+        rule_summary: 记录 PubMed/CrossRef/manual/agent crawl 来源。
+      curator_note:
+        type: text
+        required: false
+        description: 人工备注。
+        source: curator
+        participate_in_eval: false
+        physical_mapping:
+          table: paper
+          column: curator_note
+  paper_entity_record:
+    description: 论文对象记录表；1 行 = 1 篇论文中的 1 个肽段/对象。
+    record_granularity: one row per peptide/object within a paper
+    primary_key: record_id
+    foreign_keys:
+      paper_id: paper.paper_id
+      source_paper_id: paper.paper_id
+    id_rule: '{paper_id}-R{nn}，例如 P000001-R01'
+    fields:
+      record_id:
+        type: string
+        required: true
+        description: 对象记录编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: paper_entity_record
+          column: record_id
+      paper_id:
+        type: string
+        required: true
+        description: 所属论文编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: paper_entity_record
+          column: paper_id
+      entity_name_raw:
+        type: string
+        required: true
+        description: 原文中的肽段/对象名称。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: entity_name_raw
+      entity_name_normalized:
+        type: string
+        required: true
+        description: 标准化肽段/对象名称。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: entity_name_normalized
+        rule_summary: 优先使用序列本身；无序列时使用统一代号。
+      sequence_status:
+        type: enum
+        required: true
+        description: 序列提供状态。
+        source: agent
+        participate_in_eval: true
+        enum: sequence_status
+        default: not_reported
+        physical_mapping:
+          table: paper_entity_record
+          column: sequence_status_id
+      sequence_raw:
+        type: string
+        required: false
+        description: 原文或回补获得的序列字符串。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: sequence_raw
+      sequence_normalized:
+        type: string
+        required: false
+        description: 标准化序列。
+        source: system_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: sequence_normalized
+        rule_summary: 去除空格、特殊字符、修饰符号，仅保留大写单字母氨基酸代码。
+      is_sequence_backfilled:
+        type: boolean
+        required: true
+        description: 序列是否由回补获得。
+        source: agent
+        participate_in_eval: true
+        default: false
+        physical_mapping:
+          table: paper_entity_record
+          column: is_sequence_backfilled
+      sequence_source_type:
+        type: enum
+        required: false
+        description: 序列回补来源类型。
+        source: agent
+        participate_in_eval: true
+        enum: sequence_source_type
+        physical_mapping:
+          table: paper_entity_record
+          column: sequence_source_type_id
+      sequence_source_id:
+        type: string
+        required: false
+        description: 序列回补来源标识。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: sequence_source_id
+      source_paper_id:
+        type: string
+        required: false
+        description: 序列来自已收录参考文献时的来源论文 ID。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: source_paper_id
+      sequence_source_location:
+        type: json
+        required: false
+        description: 序列在未入库来源中的位置线索。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: sequence_source_location
+      text_to_sequence_source:
+        type: string
+        required: false
+        description: 序列回补来源的人读聚合字段。
+        source: system_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: text_to_sequence_source
+      entity_type:
+        type: enum
+        required: false
+        description: 对象结构类型。
+        source: agent
+        participate_in_eval: true
+        enum: entity_type
+        default: single_peptide
+        physical_mapping:
+          table: paper_entity_record
+          column: entity_type_id
+        rule_summary: 可由 entity_component 中功能类模块数量推断。
+      design_source_raw:
+        type: string
+        required: false
+        description: 原文关于来源/设计方式的描述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: design_source_raw
+      design_source:
+        type: enum
+        required: false
+        description: 标准化设计来源。
+        source: agent
+        participate_in_eval: true
+        enum: design_source
+        default: unclear
+        physical_mapping:
+          table: paper_entity_record
+          column: design_source_id
+      entity_carrier_raw:
+        type: string
+        required: false
+        description: 对象整体包含载体/基质时的原文描述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: entity_carrier_raw
+      entity_carrier_type:
+        type: enum
+        required: false
+        description: 对象整体载体体系分类。
+        source: agent
+        participate_in_eval: true
+        enum: entity_carrier_type
+        default: unclear
+        physical_mapping:
+          table: paper_entity_record
+          column: entity_carrier_type_id
+      application_form:
+        type: enum
+        required: false
+        description: 肽段在当前文献中的宏观使用方式。
+        source: agent
+        participate_in_eval: true
+        enum: application_form
+        default: unclear
+        physical_mapping:
+          table: paper_entity_record
+          column: application_form_id
+      target_material_raw:
+        type: string
+        required: false
+        description: 主要作用材料原文描述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: target_material_raw
+      target_material:
+        type: enum
+        required: false
+        description: 主要作用材料。
+        source: agent
+        participate_in_eval: true
+        enum: target_material
+        default: unclear
+        physical_mapping:
+          table: paper_entity_record
+          column: target_material_id
+      target_substrate_raw:
+        type: string
+        required: false
+        description: 作用基底/界面原文描述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: target_substrate_raw
+      target_substrate:
+        type: enum
+        required: false
+        description: 主要作用基底。
+        source: agent
+        participate_in_eval: true
+        enum: target_substrate
+        default: unclear
+        physical_mapping:
+          table: paper_entity_record
+          column: target_substrate_id
+      summary_functions:
+        type: list[enum]
+        required: true
+        description: 核心功能标签集合。
+        source: derived
+        participate_in_eval: true
+        enum: function_label
+        physical_mapping:
+          table: derived
+          column: from_record_function.function_label
+        rule_summary: 由 record_function.function_label 去重聚合生成；不是最终事实来源。
+      evidence_overall_level:
+        type: enum
+        required: true
+        description: 对象整体最高证据层级。
+        source: agent
+        participate_in_eval: true
+        enum: evidence_level
+        default: unclear
+        physical_mapping:
+          table: paper_entity_record
+          column: evidence_overall_level_id
+      model_system_summary:
+        type: string
+        required: false
+        description: 实验模型体系简述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: paper_entity_record
+          column: model_system_summary
+      seq_section_path:
+        type: enum
+        required: false
+        description: 序列信息章节。
+        source: agent
+        participate_in_eval: true
+        enum: section_path
+        physical_mapping:
+          table: source_location
+          column: section_path_id
+          role: sequence
+      seq_subsection_label:
+        type: string
+        required: false
+        description: 序列信息小节。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: subsection_label
+          role: sequence
+      seq_figure_ref:
+        type: string
+        required: false
+        description: 序列信息图编号。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: figure_ref
+          role: sequence
+      seq_table_ref:
+        type: string
+        required: false
+        description: 序列信息表编号。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: table_ref
+          role: sequence
+      seq_page_no:
+        type: integer
+        required: false
+        description: 序列信息页码。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: page_no
+          role: sequence
+      text_to_sequence:
+        type: string
+        required: false
+        description: 序列来源的人读聚合展示。
+        source: system_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: derived
+          column: source_location.display_text
+          role: sequence
+      trace_status:
+        type: enum
+        required: true
+        description: 对象记录溯源完整度。
+        source: agent
+        participate_in_eval: true
+        enum: trace_status
+        default: missing
+        physical_mapping:
+          table: source_location_link
+          column: link_status
+      curator_note:
+        type: text
+        required: false
+        description: 人工备注。
+        source: curator
+        participate_in_eval: false
+        physical_mapping:
+          table: paper_entity_record
+          column: curator_note
+  record_function:
+    description: 功能结论表；1 行 = 1 个肽段对象的一种功能结论。
+    record_granularity: one row per function claim of an entity record
+    primary_key: function_id
+    foreign_keys:
+      record_id: paper_entity_record.record_id
+    id_rule: '{record_id}-F{nn}'
+    physical_table: function_claim
+    fields:
+      function_id:
+        type: string
+        required: true
+        description: 功能记录编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: function_claim
+          column: function_claim_id
+      record_id:
+        type: string
+        required: true
+        description: 所属对象记录编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: function_claim
+          column: record_id
+      function_layer:
+        type: enum
+        required: true
+        description: 功能宏观层级。
+        source: agent
+        participate_in_eval: true
+        enum: function_layer
+        physical_mapping:
+          table: function_claim
+          column: function_layer_id
+      function_label:
+        type: enum
+        required: true
+        description: 具体功能标签。
+        source: agent
+        participate_in_eval: true
+        enum: function_label
+        physical_mapping:
+          table: function_claim
+          column: function_label_id
+      function_source_raw:
+        type: string
+        required: false
+        description: 原文功能描述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: function_claim
+          column: function_source_raw
+      evidence_level:
+        type: enum
+        required: true
+        description: 支撑该功能的最高证据层级。
+        source: agent
+        participate_in_eval: true
+        enum: evidence_level
+        default: unclear
+        physical_mapping:
+          table: function_claim
+          column: evidence_level_id
+      func_section_path:
+        type: enum
+        required: false
+        description: 功能结论章节。
+        source: agent
+        participate_in_eval: true
+        enum: section_path
+        physical_mapping:
+          table: source_location
+          column: section_path_id
+          role: function
+      func_subsection_label:
+        type: string
+        required: false
+        description: 功能结论小节。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: subsection_label
+          role: function
+      func_figure_ref:
+        type: string
+        required: false
+        description: 功能结论图编号。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: figure_ref
+          role: function
+      func_table_ref:
+        type: string
+        required: false
+        description: 功能结论表编号。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: table_ref
+          role: function
+      func_page_no:
+        type: integer
+        required: false
+        description: 功能结论页码。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: page_no
+          role: function
+      text_to_function:
+        type: string
+        required: false
+        description: 功能结论人读溯源。
+        source: system_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: derived
+          column: source_location.display_text
+          role: function
+      trace_status:
+        type: enum
+        required: true
+        description: 功能记录溯源完整度。
+        source: agent
+        participate_in_eval: true
+        enum: trace_status
+        default: missing
+        physical_mapping:
+          table: source_location_link
+          column: link_status
+      curator_note:
+        type: text
+        required: false
+        description: 人工备注。
+        source: curator
+        participate_in_eval: false
+        physical_mapping:
+          table: function_claim
+          column: curator_note
+  function_assay_evidence:
+    description: 功能证据表；1 行 = 1 个功能结论对应的 1 种实验方法 + 1 组结果。
+    record_granularity: one row per function-method-result evidence observation
+    primary_key: evidence_id
+    foreign_keys:
+      function_id: record_function.function_id
+    id_rule: '{function_id}-E{nn}'
+    physical_tables:
+    - evidence_observation
+    - function_evidence_link
+    - source_location
+    - source_location_link
+    fields:
+      evidence_id:
+        type: string
+        required: true
+        description: 证据记录编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: evidence_observation
+          column: evidence_id
+      function_id:
+        type: string
+        required: true
+        description: 关联功能记录编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: function_evidence_link
+          column: function_claim_id
+      evidence_level:
+        type: enum
+        required: true
+        description: 本条证据层级。
+        source: agent
+        participate_in_eval: true
+        enum: evidence_level
+        default: unclear
+        physical_mapping:
+          table: evidence_observation
+          column: evidence_level_id
+      additive_system_raw:
+        type: string
+        required: false
+        description: 该证据实验载体/添加体系原文描述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: evidence_observation
+          column: additive_system_raw
+      additive_system_type:
+        type: enum
+        required: false
+        description: 标准化载体/添加体系类型。
+        source: agent
+        participate_in_eval: true
+        enum: additive_system_type
+        default: unclear
+        physical_mapping:
+          table: evidence_observation
+          column: additive_system_type_id
+      delivery_mode:
+        type: enum
+        required: false
+        description: 肽段在该证据中的给药/使用方式。
+        source: agent
+        participate_in_eval: true
+        enum: delivery_mode
+        physical_mapping:
+          table: evidence_observation
+          column: delivery_mode_id
+      assay_category:
+        type: enum
+        required: true
+        description: 实验类别。
+        source: agent
+        participate_in_eval: true
+        enum: assay_category
+        physical_mapping:
+          table: evidence_observation
+          column: assay_category_id
+      validation_method_raw:
+        type: string
+        required: false
+        description: 原文实验方法名称。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: evidence_observation
+          column: validation_method_raw
+      validation_method:
+        type: enum
+        required: true
+        description: 标准化实验方法。
+        source: agent
+        participate_in_eval: true
+        enum: validation_method
+        physical_mapping:
+          table: evidence_observation
+          column: validation_method_id
+      readout_main:
+        type: string
+        required: false
+        description: 主要测量指标。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: evidence_observation
+          column: readout_main
+      result_text_summary:
+        type: text
+        required: true
+        description: 核心结果简述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: evidence_observation
+          column: result_text_summary
+      result_value_raw:
+        type: string
+        required: false
+        description: 原文数值表述。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: evidence_observation
+          column: result_value_raw
+      result_value_normalized:
+        type: json
+        required: false
+        description: 标准化数值信息。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: evidence_observation
+          column: result_value_normalized
+      section_path:
+        type: enum
+        required: false
+        description: 证据章节。
+        source: agent
+        participate_in_eval: true
+        enum: section_path
+        physical_mapping:
+          table: source_location
+          column: section_path_id
+          role: evidence
+      subsection_label:
+        type: string
+        required: false
+        description: 证据小节。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: subsection_label
+          role: evidence
+      figure_ref:
+        type: string
+        required: false
+        description: 图编号。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: figure_ref
+          role: evidence
+      table_ref:
+        type: string
+        required: false
+        description: 表编号。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: table_ref
+          role: evidence
+      page_no:
+        type: integer
+        required: false
+        description: 页码。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: page_no
+          role: evidence
+      quote_snippet:
+        type: string
+        required: false
+        description: 支持结论的原文关键句。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: source_location
+          column: quote_snippet
+          role: evidence
+      offset_start:
+        type: integer
+        required: false
+        description: 文本起始偏移量。
+        source: system_or_rag
+        participate_in_eval: false
+        physical_mapping:
+          table: source_location
+          column: offset_start
+          role: evidence
+      offset_end:
+        type: integer
+        required: false
+        description: 文本结束偏移量。
+        source: system_or_rag
+        participate_in_eval: false
+        physical_mapping:
+          table: source_location
+          column: offset_end
+          role: evidence
+      location_type:
+        type: enum
+        required: false
+        description: 位置类型。
+        source: agent
+        participate_in_eval: true
+        enum: location_type
+        physical_mapping:
+          table: source_location
+          column: location_type_id
+          role: evidence
+      text_to_evidence:
+        type: string
+        required: false
+        description: 证据人读溯源。
+        source: system_or_agent
+        participate_in_eval: true
+        physical_mapping:
+          table: derived
+          column: source_location.display_text
+          role: evidence
+      trace_status:
+        type: enum
+        required: true
+        description: 证据溯源完整度。
+        source: agent
+        participate_in_eval: true
+        enum: trace_status
+        default: missing
+        physical_mapping:
+          table: source_location_link
+          column: link_status
+      curator_note:
+        type: text
+        required: false
+        description: 人工备注。
+        source: curator
+        participate_in_eval: false
+        physical_mapping:
+          table: evidence_observation
+          column: curator_note
+  entity_component:
+    description: 对象组成表；1 行 = 1 个对象中的 1 个组成模块。
+    record_granularity: one row per component/module of an entity record
+    primary_key: component_id
+    foreign_keys:
+      record_id: paper_entity_record.record_id
+    id_rule: '{record_id}-C{nn}'
+    fields:
+      component_id:
+        type: string
+        required: true
+        description: 模块记录编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: entity_component
+          column: component_id
+      record_id:
+        type: string
+        required: true
+        description: 所属对象记录编号。
+        source: system
+        participate_in_eval: false
+        physical_mapping:
+          table: entity_component
+          column: record_id
+      component_order:
+        type: integer
+        required: true
+        description: 模块排列顺序。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: component_order
+        rule_summary: 从 N 端到 C 端，从 1 递增。
+      component_type:
+        type: enum
+        required: true
+        description: 模块类型。
+        source: agent
+        participate_in_eval: true
+        enum: component_type
+        physical_mapping:
+          table: entity_component
+          column: component_type_id
+      component_name_raw:
+        type: string
+        required: false
+        description: 原文模块名称。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: component_name_raw
+      component_sequence:
+        type: string
+        required: false
+        description: 该模块氨基酸序列。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: component_sequence
+      is_natural:
+        type: boolean
+        required: false
+        description: 蛋白片段是否与天然母体序列一致。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: is_natural
+        rule_summary: 仅 protein_fragment 通常填写 true/false；其他模块填 NULL。
+        applicable_when: component_type == protein_fragment
+      modification_category:
+        type: enum
+        required: false
+        description: 修饰大类。
+        source: agent
+        participate_in_eval: true
+        enum: modification_category
+        physical_mapping:
+          table: entity_component
+          column: modification_category_id
+      modification_detail:
+        type: string
+        required: false
+        description: 修饰细节。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: modification_detail
+        rule_summary: 格式 "{位点或范围}:{修饰子类型}:{简要描述}"，多个用分号分隔。
+      parent_protein_raw:
+        type: string
+        required: false
+        description: 母体蛋白原始名称。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: parent_protein_raw
+        applicable_when: component_type == protein_fragment
+      parent_protein_accession:
+        type: string
+        required: false
+        description: 母体蛋白数据库登录号。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: parent_protein_accession
+        applicable_when: component_type == protein_fragment
+      fragment_start:
+        type: integer
+        required: false
+        description: 片段在母体蛋白中起始残基。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: fragment_start
+        applicable_when: component_type == protein_fragment
+      fragment_end:
+        type: integer
+        required: false
+        description: 片段在母体蛋白中结束残基。
+        source: agent
+        participate_in_eval: true
+        physical_mapping:
+          table: entity_component
+          column: fragment_end
+        applicable_when: component_type == protein_fragment
+      fragment_derivation_type:
+        type: enum
+        required: false
+        description: 片段来源区域。
+        source: agent
+        participate_in_eval: true
+        enum: fragment_derivation_type
+        physical_mapping:
+          table: entity_component
+          column: fragment_derivation_type_id
+        rule_summary: 即使 is_natural=false，也应正常填写；来源区域不因是否突变而改变。
+        applicable_when: component_type == protein_fragment
+      curator_note:
+        type: text
+        required: false
+        description: 人工备注。
+        source: curator
+        participate_in_eval: false
+        physical_mapping:
+          table: entity_component
+          column: curator_note
+cross_table_rules:
+  summary_functions_derivation: paper_entity_record.summary_functions 由同一 record_id 下 record_function.function_label 去重聚合生成。
+  evidence_overall_level_derivation: paper_entity_record.evidence_overall_level 由该对象所有 function/evidence 中最高证据层级推断。
+  entity_type_derivation: entity_type 可由 entity_component 中功能类模块数量推断：1 个功能类为 single_peptide/protein_fragment/full_protein/modified_peptide；2
+    个为 fusion_peptide；3 个及以上为 chimeric_peptide。
+  function_layer_label_consistency:
+    binding:
+    - adsorption
+    - localization
+    - ion_capture
+    kinetics:
+    - nucleation
+    - mineral_deposition
+    - crystal_growth_promotion
+    crystallography:
+    - phase_stabilization
+    - phase_transformation_promotion
+    - crystal_growth_inhibition
+    - crystal_orientation_modulation
+    - crystal_morphology_modulation
+    protection:
+    - anti_demineralization
+    biology:
+    - antimicrobial
+    - cell_adhesion_promotion
+    other:
+    - other
+  source_location_display_generation: text_to_sequence/text_to_function/text_to_evidence 由 section_path、subsection_label、figure_ref、table_ref
+    等结构化位置字段生成，多来源用分号分隔。
+  no_direct_business_table_write: Agent 和 RAG 工具不得直接写 paper_entity_record/function_claim/evidence_observation 等物理表；必须由 save_extraction_package
+    统一处理。
+recommended_agent_io:
+  input_context:
+  - extraction_contract
+  - filling_rules_summary
+  - db_context
+  - rag_parse_id
+  - available_tools
+  output_package:
+    paper: paper object
+    paper_entity_records: list of entity records; each may contain entity_components and record_functions
+    record_functions: list of function claims or nested in each entity
+    function_assay_evidences: list of evidence observations or nested in each function

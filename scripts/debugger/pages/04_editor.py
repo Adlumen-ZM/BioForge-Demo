@@ -42,7 +42,9 @@ for _p in [str(_ROOT), str(_SCRIPTS_DIR), str(_DEBUGGER_DIR)]:
 import streamlit as st
 
 from components.agent_runner import AgentRunner
-from components.ui_helpers import STATUS_ICONS, format_ms, render_status_badge, render_step_card
+from components.ui_helpers import (
+    STATUS_ICONS, format_ms, render_replan_card, render_status_badge, render_step_card,
+)
 
 # ─────────────────────────────────────────────
 # 页面配置
@@ -61,7 +63,8 @@ st.set_page_config(
 def _init() -> None:
     defaults: dict[str, Any] = {
         "is_running":       False,
-        "steps_state":      {},   # step_id → 最新事件数据
+        "steps_state":      {},   # step_id → 最新状态（用于流式 running 指示器）
+        "events_log":       [],   # 时间轴事件列表（step_done + replan 按顺序）
         "run_error":        None,
         "run_done":         False,
         "current_run_id":   None,
@@ -91,6 +94,7 @@ PLAN_OPTIONS: dict[str, str] = {
     "plan_abort_scenario":  "💥 持续失败→中止（mock_fail）",
     "plan_full_coverage":   "🧪 全分支覆盖（4步串联）",
     "plan_deep_analysis":   "🔬 深度分析（多轮轮询 + validate_plan 失败）",
+    "plan_modify_step":     "🔧 MODIFY_STEP Replan（LLM 改写指令）",  # ⭐ 新增
 }
 
 AGENT_OPTIONS: dict[str, str] = {
@@ -111,81 +115,164 @@ EXPERIMENTS_DIR.mkdir(exist_ok=True)
 _LLM_TRACE_ETYPES = {"llm_start", "llm_end", "tool_call", "tool_result", "llm_error"}
 
 
-def _update_steps_state(steps_state: dict[str, Any], event: dict[str, Any]) -> None:
-    """根据 TraceEvent / LLM Trace 事件 dict 更新 steps_state。
+def _update_steps_state(
+    steps_state: dict[str, Any],
+    event: dict[str, Any],
+    events_log: list,
+) -> None:
+    """根据 TraceEvent / LLM Trace 事件 dict 更新 steps_state 和 events_log。
 
-    step_start → status=running（占位），初始化 llm_trace=[]
-    step_end   → 完整事件数据（含 status / output / duration 等）
-    llm_start / llm_end / tool_call / tool_result / llm_error
-               → 追加到对应 step 的 llm_trace 列表
-    其他事件（plan_start/plan_end）→ 忽略
+    steps_state（按 step_id 聚合）：
+      step_start    → status=running，初始化 llm_trace，保留 replan_history（重试时不丢失）
+      step_end      → 完整数据，保留 llm_trace 和 replan_history
+      step_replanned→ 追加 replan_history
+      llm_* 事件   → 追加到当前 step 的 llm_trace
+
+    events_log（时间顺序日志，用于时间轴渲染）：
+      step_end      → append {"log_type": "step_done", ...}
+      step_replanned→ append {"log_type": "replan", ...}
 
     Args:
-        steps_state: step_id → 事件状态 dict，就地修改。
-                     每条记录额外含 "llm_trace": list[dict] 字段。
-        event: 从 progress_queue 取出的事件 dict。
+        steps_state: step_id → 最新状态（就地修改，用于流式 running 指示器）
+        event:       从 progress_queue 取出的事件 dict
+        events_log:  时间轴日志列表（就地 append）
     """
     etype   = event.get("event_type", event.get("type", ""))
     step_id = event.get("step_id")
 
-    # ── LLM Trace 事件：追加到对应 step 的 llm_trace 列表 ─────────────────
+    # ── LLM Trace 事件：追加到当前 step 的 llm_trace ─────────────────────
     if etype in _LLM_TRACE_ETYPES:
         if step_id and step_id in steps_state:
             steps_state[step_id].setdefault("llm_trace", []).append(event)
-        return  # LLM trace 事件不修改 step 的其他字段
+        return
 
-    # ── 普通 step 事件 ────────────────────────────────────────────────────
     if not step_id:
         return
 
     if etype == "step_start":
+        existing = steps_state.get(step_id, {})
         steps_state[step_id] = {
             **event,
             "status": "running",
-            "llm_trace": [],  # 初始化空列表，后续 LLM 事件追加进来
+            "llm_trace": [],
+            "replan_history": existing.get("replan_history", []),  # 重试时保留 replan 历史
         }
+
     elif etype == "step_end":
-        # 合并 step_start 的 payload（含 tools_required）到 step_end 数据
-        existing = steps_state.get(step_id, {})
+        existing      = steps_state.get(step_id, {})
         start_payload = existing.get("payload") or {}
-        end_payload = event.get("payload") or {}
-        # step_end payload 优先，但保留 step_start 独有的字段（如 tools_required）
+        end_payload   = event.get("payload") or {}
         merged_payload = {**start_payload, **end_payload}
-        steps_state[step_id] = {
+        updated = {
             **existing,
             **event,
-            "payload": merged_payload,
-            "llm_trace": existing.get("llm_trace", []),  # 保留已积累的 LLM 事件
+            "payload":       merged_payload,
+            "llm_trace":     existing.get("llm_trace", []),
+            "replan_history": existing.get("replan_history", []),
         }
+        steps_state[step_id] = updated
+
+        # ⭐ 时间轴：每次 step 完成（无论成功/失败）写一条 step_done 记录
+        events_log.append({
+            "log_type":    "step_done",
+            "step_id":     step_id,
+            "status":      event.get("status"),
+            "duration_ms": event.get("duration_ms"),
+            "payload":     merged_payload,
+            "llm_trace":   existing.get("llm_trace", []),
+            # 标记此次完成前是否已有 replan（用于标注"replan后"）
+            "after_replan": len(existing.get("replan_history", [])) > 0,
+        })
+
+    elif etype == "step_replanned":
+        existing = steps_state.get(step_id, {})
+        replan_history = list(existing.get("replan_history", []))
+        replan_history.append(event.get("payload", {}))
+        steps_state[step_id] = {**existing, "replan_history": replan_history}
+
+        # ⭐ 时间轴：replan 事件作为独立分隔卡
+        events_log.append({
+            "log_type": "replan",
+            "step_id":  step_id,
+            "payload":  event.get("payload", {}),
+        })
 
 
-def _render_streaming_view(steps_state: dict[str, Any]) -> None:
-    """在 placeholder.container() 中渲染当前所有 step 的卡片。
+def _render_timeline_view(
+    events_log: list[dict],
+    running_steps: dict[str, Any] | None = None,
+) -> None:
+    """时间轴模式：按事件发生顺序渲染 step 尝试和 replan 分隔卡。
 
-    running 状态的 step：显示蓝色进度提示 + 已捕获的实时 LLM 事件；
-    已完成的 step：渲染完整 step 卡片（含 LLM 思考链折叠区）。
+    每次 step 完成（成功或失败）显示为独立卡片；
+    replan 事件显示为紫色分隔块（夹在失败尝试和下一次重试之间）；
+    running_steps 传入时，在末尾显示当前正在执行的 step 的流式进度指示器。
 
-    Args:
-        steps_state: step_id → 事件状态 dict。
+    视觉效果：
+        ✅ step_01_normal
+        ❌ step_02（第1次尝试，失败）
+        🔧 MODIFY_STEP Replan 触发 ─────────────────────
+        ✅ step_02（第2次尝试，replan后成功）
+        ✅ step_03_verify
     """
-    for sid, sdata in sorted(steps_state.items()):
-        status     = sdata.get("status", "unknown")
-        llm_events = sdata.get("llm_trace", [])
+    step_attempt_counts: dict[str, int] = {}
 
-        if status == "running":
-            # 实时进度：显示已捕获到的 LLM/工具事件数量
+    for entry in events_log:
+        log_type = entry.get("log_type")
+        step_id  = entry.get("step_id", "")
+
+        if log_type == "step_done":
+            status = entry.get("status", "unknown")
+            step_attempt_counts[step_id] = step_attempt_counts.get(step_id, 0) + 1
+            attempt_n    = step_attempt_counts[step_id]
+            after_replan = entry.get("after_replan", False)
+
+            # 构造带"尝试次数"标签的渲染数据
+            render_data = dict(entry)
+            payload = dict(entry.get("payload") or {})
+            orig_name = payload.get("step_name", step_id)
+
+            if attempt_n > 1 or after_replan:
+                tag = ""
+                if after_replan:
+                    tag = "replan后"
+                if attempt_n > 1:
+                    tag = f"第{attempt_n}次{'，' + tag if tag else ''}"
+                payload["step_name"] = f"{orig_name}（{tag}）"
+            render_data["payload"] = payload
+
+            # 失败尝试收起（节省空间），成功展开
+            render_step_card(
+                render_data,
+                expanded=(status != "failed"),
+                llm_events=entry.get("llm_trace") or None,
+            )
+
+        elif log_type == "replan":
+            render_replan_card(entry.get("payload", {}))
+
+    # ── 流式 running 指示器（仅在运行中时传入）
+    if running_steps:
+        for sid, sdata in sorted(running_steps.items()):
+            llm_events = sdata.get("llm_trace", [])
             llm_cnt  = sum(1 for e in llm_events if e.get("event_type") == "llm_end")
             tool_cnt = sum(1 for e in llm_events if e.get("event_type") == "tool_call")
             detail = []
-            if llm_cnt:
-                detail.append(f"LLM×{llm_cnt}")
-            if tool_cnt:
-                detail.append(f"工具×{tool_cnt}")
+            if llm_cnt:  detail.append(f"LLM×{llm_cnt}")
+            if tool_cnt: detail.append(f"工具×{tool_cnt}")
             hint = ("  |  " + ", ".join(detail)) if detail else ""
-            st.info(f"🔄 **{sid}** — 执行中...{hint}")
-        else:
-            render_step_card(sdata, expanded=(status == "failed"),
-                             llm_events=llm_events or None)
+
+            replan_cnt = len(sdata.get("replan_history", []))
+            if replan_cnt:
+                st.markdown(
+                    f'<div style="background:#3d1f6e;border-left:4px solid #A78BFA;'
+                    f'padding:8px 12px;border-radius:4px;margin:4px 0;">'
+                    f'🔧 <b>{sid}</b> — replan后第{replan_cnt + 1}次重试中...{hint}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info(f"🔄 **{sid}** — 执行中...{hint}")
 
 
 # ─────────────────────────────────────────────
@@ -244,6 +331,49 @@ with left_col:
     if model_input.strip():
         overrides["model"] = model_input.strip()
         st.session_state["editor_model"] = model_input.strip()
+
+    # ── Replan 配置（test_agent 专属，用于验证 MODIFY_STEP 路径）
+    if agent_name == "test":
+        with st.expander("🔧 Replan 配置（MODIFY_STEP）", expanded=(
+            st.session_state.get("editor_plan") == "plan_modify_step"
+        )):
+            st.caption(
+                "控制 step 失败后的重规划策略。"
+                "选 `llm_on_exhaustion` + 运行 `plan_modify_step` 可观察 LLM 改写指令的完整流程。"
+            )
+            # plan_modify_step 被选中时默认开启 llm_on_exhaustion，其余默认 rule_only
+            _default_strategy_idx = (
+                1 if st.session_state.get("editor_plan") == "plan_modify_step" else 0
+            )
+            replan_strategy = st.selectbox(
+                "Replan 策略",
+                options=["rule_only", "llm_on_exhaustion"],
+                index=_default_strategy_idx,
+                key="sel_replan_strategy",
+                help=(
+                    "rule_only（默认）：只做 RETRY / ABORT，不调 LLM，保持 v0.1 行为。\n"
+                    "llm_on_exhaustion：达到 replan_threshold 次失败后，调 LLM 改写 step.instruction。"
+                ),
+            )
+            replan_threshold = st.number_input(
+                "Replan 阈值（replan_threshold）",
+                min_value=0, max_value=5, value=1, step=1,
+                key="num_replan_threshold",
+                help="retry_count 达到此值时升级到 LLM 改写（仅 llm_on_exhaustion 有效）。默认 1。",
+            )
+            max_step_retries_override = st.number_input(
+                "max_step_retries（覆盖）",
+                min_value=1, max_value=5, value=3, step=1,
+                key="num_max_step_retries",
+                help=(
+                    "plan_modify_step 需要至少 3 次（RETRY + MODIFY_STEP + 最终尝试）。"
+                    "默认值 3，运行其他 plan 时可改回 2。"
+                ),
+            )
+            # 写入 overrides（rule_only 时也传，保持可见性）
+            overrides["replan_strategy"]  = replan_strategy
+            overrides["replan_threshold"] = int(replan_threshold)
+            overrides["max_step_retries"] = int(max_step_retries_override)
 
     # ── Identity YAML 内联编辑（只在内存 overrides，不写回文件）
     with st.expander("📄 Identity YAML（内联编辑）", expanded=False):
@@ -342,7 +472,7 @@ with left_col:
                 "overrides":   overrides,
                 "run_id":      st.session_state.get("last_run_id"),
                 "created_at":  datetime.now().isoformat(),
-                "result_status": (st.session_state.get("last_result") or {}).get("status"),
+                "result_status": ((st.session_state.get("last_result") or {}).get("run_metadata") or {}).get("status"),
             }
             target = EXPERIMENTS_DIR / f"{filename.strip()}.yaml"
             try:
@@ -384,6 +514,7 @@ with right_col:
         # 重置状态
         st.session_state["is_running"]     = True
         st.session_state["steps_state"]    = {}
+        st.session_state["events_log"]     = []   # ⭐ 重置时间轴日志
         st.session_state["run_error"]      = None
         st.session_state["run_done"]       = False
         st.session_state["last_result"]    = None
@@ -407,6 +538,7 @@ with right_col:
 
         # ── 轮询 queue，实时重绘
         steps_state: dict[str, Any] = {}
+        events_log:  list           = []
         while thread.is_alive() or not progress_q.empty():
             updated = False
             done_or_error = False
@@ -437,12 +569,14 @@ with right_col:
                                 st.code(tb, language="python")
                     break
                 else:
-                    _update_steps_state(steps_state, event)
+                    _update_steps_state(steps_state, event, events_log)
                     updated = True
 
             if updated:
+                running = {sid: s for sid, s in steps_state.items()
+                           if s.get("status") == "running"}
                 with result_placeholder.container():
-                    _render_streaming_view(steps_state)
+                    _render_timeline_view(events_log, running_steps=running)
 
             if done_or_error:
                 break
@@ -452,6 +586,7 @@ with right_col:
         # ── 最终渲染
         st.session_state["is_running"]  = False
         st.session_state["steps_state"] = steps_state
+        st.session_state["events_log"]  = events_log
 
         final_result = st.session_state.get("last_result")
         run_error    = st.session_state.get("run_error")
@@ -459,20 +594,27 @@ with right_col:
         if run_error:
             status_placeholder.error(f"❌ 运行出错：{run_error}")
         elif final_result:
-            final_status = final_result.get("status", "unknown")
+            # status 在 run_metadata.status 里，不在 patch 顶层
+            run_meta = final_result.get("run_metadata") or {}
+            final_status = run_meta.get("status", "unknown")
+            step_count   = run_meta.get("step_count", "?")
             if final_status == "success":
                 status_placeholder.success(
-                    f"✅ 运行完成！`{resolved_run_id}`  ·  "
-                    f"⏱ {format_ms(final_result.get('total_duration_ms'))}"
+                    f"✅ 运行完成（validate_plan 通过）  ·  `{resolved_run_id}`  ·  共 {step_count} 步"
+                )
+            elif final_status == "partial":
+                status_placeholder.warning(
+                    f"⚠️ 部分成功（有步骤最终失败，但 validate_plan 通过）  ·  `{resolved_run_id}`"
                 )
             else:
-                status_placeholder.warning(
-                    f"⚠️ 运行结束，状态=**{final_status}**  ·  `{resolved_run_id}`"
+                status_placeholder.error(
+                    f"❌ 运行失败（status={final_status}）  ·  `{resolved_run_id}`  ·  "
+                    f"可能原因：step abort 或 validate_plan 未通过"
                 )
 
-            # 最终完整渲染
+            # 最终完整渲染（时间轴模式，无 running 指示器）
             with result_placeholder.container():
-                _render_streaming_view(steps_state)
+                _render_timeline_view(events_log, running_steps=None)
 
                 # 最终结果摘要
                 st.markdown("---")
@@ -487,16 +629,17 @@ with right_col:
         last_run_id = st.session_state.get("last_run_id")
 
         if last_result:
-            last_status = last_result.get("status", "unknown")
+            last_meta   = last_result.get("run_metadata") or {}
+            last_status = last_meta.get("status", "unknown")
             icon = STATUS_ICONS.get(last_status, "❓")
             status_placeholder.markdown(
                 f"{icon} **上次运行** `{last_run_id}` · 状态={last_status}"
             )
 
-            last_steps = st.session_state.get("steps_state", {})
-            if last_steps:
+            last_events = st.session_state.get("events_log", [])
+            if last_events:
                 with result_placeholder.container():
-                    _render_streaming_view(last_steps)
+                    _render_timeline_view(last_events, running_steps=None)
 
                     st.markdown("---")
                     st.markdown("#### 📦 最终结果")

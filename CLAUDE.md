@@ -39,9 +39,9 @@ backend/src/
 │   │   ├── context_builder.py ← identity/skills/摘要 → system prompt
 │   │   ├── executor.py      ← create_react_agent 封装
 │   │   ├── validator.py     ← validate_step（规则）+ validate_plan（LLM）
-│   │   ├── replanner.py     ← 失败时决策 retry/abort
-│   │   ├── hooks.py         ← Trace Sink（TraceHook + NullBackend）
-│   │   ├── output_adapter.py ← AgentRunResult → PipelineState patch
+│   │   ├── replanner.py     ← 失败时决策 retry/modify_step/abort（支持 LLM 改写指令）
+│   │   ├── hooks.py         ← Trace Sink（TraceHook + NullBackend），含 on_step_replanned
+│   │   ├── output_adapter.py ← AgentRunResult → PipelineState patch（summary_key 去 _agent 后缀）
 │   │   ├── plan_runner.py   ← 核心 Runtime（step 循环）
 │   │   └── template_agent.py ← 对外入口 AgentTemplate
 │   ├── search_agent/        ← SearchAgent 配套（plan/identity/skills/agent.py）

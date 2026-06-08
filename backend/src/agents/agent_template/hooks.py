@@ -68,7 +68,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from .schemas import AgentRunResult, Plan, PlanStep, StepResult
+from .schemas import AgentRunResult, Plan, PlanStep, ReplanDecision, StepResult
 
 
 # ─────────────────────────────────────────────
@@ -306,6 +306,57 @@ class TraceHook:
                 "successful_steps": sum(1 for r in run_result.step_results if r.status == "success"),
                 "failed_steps": sum(1 for r in run_result.step_results if r.status == "failed"),
                 "final_output_keys": list(run_result.final_output.keys()),
+            },
+        )
+        self._write(event)
+
+    def on_step_replanned(
+        self,
+        step: PlanStep,
+        decision: ReplanDecision,
+        retry_count: int,
+        model_used: str = "",
+    ) -> None:
+        """MODIFY_STEP 决策执行后调用，记录 replan 的完整上下文。
+
+        调用时机（plan_runner）：
+          step_end(failed) 之后、plan.steps 替换之前。
+          此时 step 仍是原始版本，decision.updated_step 是 LLM 修改后的版本。
+          只在 decision.action == MODIFY_STEP 时调用，RETRY 路径不调用。
+
+        event_type = "step_replanned"（新类型，写入同一张 agent_trace_events 表）
+
+        payload 字段：
+          trigger              — 触发类型（"MODIFY_STEP"）
+          original_instruction — 被替换的原始指令（截断 200 字）
+          new_instruction      — LLM 生成的新指令（截断 200 字）
+          replan_reason        — LLM 给出的修改理由（截断 200 字）
+          retry_count_at_replan — 触发 replan 时已重试的次数
+          error_that_triggered — 触发本次 replan 的失败原因（来自 decision.reason）
+          model_used           — 调用的 LLM 模型字符串
+        """
+        if not self.enabled:
+            return
+        new_instr = (
+            decision.updated_step.instruction[:200]
+            if decision.updated_step is not None
+            else ""
+        )
+        event = TraceEvent(
+            run_id=self.run_id,
+            agent_run_id=self.agent_run_id,
+            stage=self.stage,
+            event_type="step_replanned",
+            step_id=step.step_id,
+            status="replanned",
+            payload={
+                "trigger": decision.action.value,
+                "original_instruction": step.instruction[:200],   # 调用前 step 仍是原始版本
+                "new_instruction": new_instr,
+                "replan_reason": decision.reason[:200],
+                "retry_count_at_replan": retry_count,
+                "error_that_triggered": decision.reason[:200],    # reason 含失败信息
+                "model_used": model_used,
             },
         )
         self._write(event)

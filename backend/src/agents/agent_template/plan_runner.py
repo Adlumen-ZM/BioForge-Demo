@@ -157,6 +157,28 @@ class PlanRunner:
 
                     # 继续循环（step_index 不变，下次循环重试同一 step）
 
+                elif decision.action == ReplanAction.MODIFY_STEP:
+                    # ⭐ 新增：LLM 修改指令后重试（replan_strategy="llm_on_exhaustion" 触发）
+                    state.increment_retry(step.step_id)
+                    state.step_results.append(result)
+
+                    # trace 固定位置 3：step_end（失败，将以新指令重试）
+                    self.hook.on_step_end(step, result, state.get_retry_count(step.step_id))
+
+                    # ⭐ 记录 step_replanned 事件（必须在替换 step 之前！
+                    #    此时 step 仍是原始版本，payload 中 original_instruction 才正确）
+                    self.hook.on_step_replanned(
+                        step=step,
+                        decision=decision,
+                        retry_count=state.get_retry_count(step.step_id),
+                        model_used=self.config.model,
+                    )
+
+                    # 替换内存中的 step（不回写 YAML，YAML = 设计时意图永远不变）
+                    if decision.updated_step is not None:
+                        plan.steps[step_index] = decision.updated_step
+                    # step_index 不变，下次循环用新 instruction 重试
+
                 elif decision.action == ReplanAction.INSERT_STEP:
                     # v0.1 未实现，降级为 ABORT（v0.2 在此处插入补救 step）
                     state.step_results.append(result)
@@ -202,12 +224,21 @@ class PlanRunner:
             if not plan_ok:
                 plan_decision = decide_plan_failure(plan_msg)
                 overall_status = "failed"
+                # TODO(max_plan_retries): v0.2 扩展点
+                # 若 config.max_plan_retries > 0 且本次是首次 plan 级失败，
+                # 可在此触发 plan 级 replan（重新执行全部 steps 或 INSERT 修复 step）。
+                # 当前 v0.1 直接 ABORT。
             else:
                 overall_status = "success"
 
-            # 判断是否有部分失败的 step
-            has_failed = any(r.status == "failed" for r in state.step_results)
-            if overall_status == "success" and has_failed:
+            # 判断是否有「最终失败」的 step
+            # 按 step_id 取最后一条结果，忽略中间重试过程中的临时失败记录
+            # （经历重试最终成功的 step 不应被计入 partial）
+            last_by_step: dict[str, StepResult] = {}
+            for r in state.step_results:
+                last_by_step[r.step_id] = r  # 后覆盖前，取最后一条
+            has_ultimately_failed = any(r.status == "failed" for r in last_by_step.values())
+            if overall_status == "success" and has_ultimately_failed:
                 overall_status = "partial"
 
             run_result = AgentRunResult(
