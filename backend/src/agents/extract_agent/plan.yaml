@@ -1,142 +1,147 @@
 ﻿# extract_agent/plan.yaml
-# ExtractAgent 的预定义 plan，多阶段抽取流程（集成 RAG）。
+# ExtractAgent 的预定义 plan，多阶段抽取流程。
 # plan_runner 按顺序执行，replanner 可在运行时修改内存中的 plan 对象（不回写此文件）。
+#
+# 注意：RAG 相关步骤（chunk_documents, embed_and_index, retrieve_context）已注释，
+#       等待 FlagEmbedding 依赖安装后启用。当前使用基础模式（llm_extract + validate_output）。
 
 plan_id: "extract_plan_v02"
 agent_name: "extract_agent"
 version: "1.0"
 
 steps:
-  - step_id: "chunk_documents"
-    name: "文档切块"
-    instruction: |
-      对输入的论文 PDF 进行解析和切块处理。
+  # ── RAG 步骤（已注释，待 FlagEmbedding 安装后启用）────────────────────────
+  # - step_id: "chunk_documents"
+  #   name: "文档切块"
+  #   instruction: |
+  #     对输入的论文 PDF 进行解析和切块处理。
+  #
+  #     输入数据（来自上游 search_agent 的 candidate_paper_ids 或本地 PDF）：
+  #       - pdf_path: PDF 文件路径或 PDF 文本内容
+  #
+  #     切块策略：
+  #       1. 使用 RAGFlow 视觉解析器进行文档解析
+  #       2. 自动识别摘要、表格、文本等不同类型的内容块
+  #       3. 每块包含 trace_id 用于溯源
+  #
+  #     调用工具：chunk_document
+  #       - 输入：pdf_path
+  #       - 输出：chunks 列表，每项包含 chunk_id、text、type、is_abstract
+  #
+  #     输出 JSON 格式：
+  #     {
+  #       "status": "success" | "error",
+  #       "chunks": [
+  #         {
+  #           "chunk_id": "<唯一标识>",
+  #           "text": "<块文本内容>",
+  #           "type": "text" | "table" | "abstract",
+  #           "is_abstract": true | false
+  #         }
+  #       ],
+  #       "chunk_count": <int>,
+  #       "error": "<错误信息或 null>"
+  #     }
+  #   tools_required:
+  #     - "chunk_document"
+  #   success_criteria:
+  #     required_fields:
+  #       - "status"
+  #       - "chunks"
+  #     min_count:
+  #       chunks: 1
+  #   max_retries: 2
+  #   db_write_policy: "none"
+  #
+  # - step_id: "embed_and_index"
+  #   name: "Embedding 与建索引"
+  #   instruction: |
+  #     对已切块的文档内容建立 BGE-M3 混合向量索引。
+  #
+  #     输入数据：
+  #       - 上一步 chunk_documents 输出的 chunks
+  #
+  #     索引配置：
+  #       - 模型：BGE-M3（BAAI/bge-m3）
+  #       - 检索策略：双路混合（dense + sparse）
+  #       - 默认权重：alpha=0.4（dense）, beta=0.6（sparse）
+  #
+  #     调用工具：build_rag_index
+  #       - 输入：chunks（可选，不传则使用上一步结果）
+  #       - 输出：索引建立状态
+  #
+  #     输出 JSON 格式：
+  #     {
+  #       "status": "success" | "error",
+  #       "indexed_count": <int>,
+  #       "error": "<错误信息或 null>"
+  #     }
+  #   tools_required:
+  #     - "build_rag_index"
+  #   success_criteria:
+  #     required_fields:
+  #       - "status"
+  #       - "indexed_count"
+  #     min_count:
+  #       indexed_count: 1
+  #   max_retries: 2
+  #   db_write_policy: "none"
+  #
+  # - step_id: "retrieve_context"
+  #   name: "RAG 召回与上下文回填"
+  #   instruction: |
+  #     根据研究目标对文档进行 RAG 检索，召回相关片段作为上下文。
+  #
+  #     输入数据：
+  #       - research_objective: 研究目标（如 "FAE 肽段与 HAp 的吸附机制"）
+  #       - 上一步建立的索引
+  #
+  #     召回策略：
+  #       1. 根据研究目标构建多个检索 query
+  #       2. 对每个 query 执行混合检索
+  #       3. 合并去重后按相关性排序
+  #       4. 低于阈值（0.1）的结果过滤
+  #
+  #     调用工具：retrieve_chunks
+  #       - 输入：query, top_k（默认 8）, threshold（默认 0.1）
+  #       - 输出：retrieved_chunks + context_summary
+  #
+  #     输出 JSON 格式：
+  #     {
+  #       "status": "success" | "error",
+  #       "query": "<检索 query>",
+  #       "retrieved_chunks": [
+  #         {
+  #           "chunk_id": "<源区块 ID>",
+  #           "text": "<块文本内容>",
+  #           "score": <相关性分数>
+  #         }
+  #       ],
+  #       "retrieved_count": <int>,
+  #       "context_summary": "<用于回填的完整上下文字符串>",
+  #       "error": "<错误信息或 null>"
+  #     }
+  #
+  #     【重要】context_summary 将作为下一步 LLM 抽取的上下文输入。
+  #   tools_required:
+  #     - "retrieve_chunks"
+  #   success_criteria:
+  #     required_fields:
+  #       - "status"
+  #       - "context_summary"
+  #     min_count:
+  #       retrieved_count: 1
+  #   max_retries: 2
+  #   db_write_policy: "none"
 
-      输入数据（来自上游 search_agent 的 candidate_paper_ids 或本地 PDF）：
-        - pdf_path: PDF 文件路径或 PDF 文本内容
-
-      切块策略：
-        1. 使用 RAGFlow 视觉解析器进行文档解析
-        2. 自动识别摘要、表格、文本等不同类型的内容块
-        3. 每块包含 trace_id 用于溯源
-
-      调用工具：chunk_document
-        - 输入：pdf_path
-        - 输出：chunks 列表，每项包含 chunk_id、text、type、is_abstract
-
-      输出 JSON 格式：
-      {
-        "status": "success" | "error",
-        "chunks": [
-          {
-            "chunk_id": "<唯一标识>",
-            "text": "<块文本内容>",
-            "type": "text" | "table" | "abstract",
-            "is_abstract": true | false
-          }
-        ],
-        "chunk_count": <int>,
-        "error": "<错误信息或 null>"
-      }
-    tools_required:
-      - "chunk_document"
-    success_criteria:
-      required_fields:
-        - "status"
-        - "chunks"
-      min_count:
-        chunks: 1
-    max_retries: 2
-    db_write_policy: "none"
-
-  - step_id: "embed_and_index"
-    name: "Embedding 与建索引"
-    instruction: |
-      对已切块的文档内容建立 BGE-M3 混合向量索引。
-
-      输入数据：
-        - 上一步 chunk_documents 输出的 chunks
-
-      索引配置：
-        - 模型：BGE-M3（BAAI/bge-m3）
-        - 检索策略：双路混合（dense + sparse）
-        - 默认权重：alpha=0.4（dense）, beta=0.6（sparse）
-
-      调用工具：build_rag_index
-        - 输入：chunks（可选，不传则使用上一步结果）
-        - 输出：索引建立状态
-
-      输出 JSON 格式：
-      {
-        "status": "success" | "error",
-        "indexed_count": <int>,
-        "error": "<错误信息或 null>"
-      }
-    tools_required:
-      - "build_rag_index"
-    success_criteria:
-      required_fields:
-        - "status"
-        - "indexed_count"
-      min_count:
-        indexed_count: 1
-    max_retries: 2
-    db_write_policy: "none"
-
-  - step_id: "retrieve_context"
-    name: "RAG 召回与上下文回填"
-    instruction: |
-      根据研究目标对文档进行 RAG 检索，召回相关片段作为上下文。
-
-      输入数据：
-        - research_objective: 研究目标（如 "FAE 肽段与 HAp 的吸附机制"）
-        - 上一步建立的索引
-
-      召回策略：
-        1. 根据研究目标构建多个检索 query
-        2. 对每个 query 执行混合检索
-        3. 合并去重后按相关性排序
-        4. 低于阈值（0.1）的结果过滤
-
-      调用工具：retrieve_chunks
-        - 输入：query, top_k（默认 8）, threshold（默认 0.1）
-        - 输出：retrieved_chunks + context_summary
-
-      输出 JSON 格式：
-      {
-        "status": "success" | "error",
-        "query": "<检索 query>",
-        "retrieved_chunks": [
-          {
-            "chunk_id": "<源区块 ID>",
-            "text": "<块文本内容>",
-            "score": <相关性分数>
-          }
-        ],
-        "retrieved_count": <int>,
-        "context_summary": "<用于回填的完整上下文字符串>",
-        "error": "<错误信息或 null>"
-      }
-
-      【重要】context_summary 将作为下一步 LLM 抽取的上下文输入。
-    tools_required:
-      - "retrieve_chunks"
-    success_criteria:
-      required_fields:
-        - "status"
-        - "context_summary"
-      min_count:
-        retrieved_count: 1
-    max_retries: 2
-    db_write_policy: "none"
-
+  # ── 基础步骤（当前启用）────────────────────────────────────────────────────
   - step_id: "llm_extract"
     name: "LLM 信息抽取"
     instruction: |
-      根据 RAG 召回的上下文，调用 LLM 抽取结构化信息。
+      根据输入的论文文本，调用 LLM 抽取结构化信息。
 
-      输入数据（来自上一步 retrieve_context 的 context_summary）：
-        - context_summary: RAG 召回的相关片段汇总
+      输入数据（来自 pipeline_state）：
+        - paper_texts: 论文文本内容列表
 
       抽取要求：
         1. 提取论文元数据：DOI、标题、作者、期刊、发表年份
