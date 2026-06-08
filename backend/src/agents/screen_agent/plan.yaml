@@ -1,0 +1,57 @@
+# screen_agent/plan.yaml
+# ScreenAgent 的预定义 plan，两步式筛选→下载流程。
+
+plan_id: "screen_plan_v01"
+agent_name: "screen_agent"
+version: "0.1"
+
+steps:
+  - step_id: "screen_papers"
+    name: "文献相关性筛选"
+    instruction: |
+      调用 screen_paper 工具，根据筛选标准对上游 search_agent 传入的候选文献进行相关性筛选。
+
+      筛选标准（criteria）：基于 identity.yaml 中的 objective 和 constraints 构造，
+      说明应保留什么样的文献（如：研究肽-矿物相互作用的原创实验研究，排除纯计算和综述）。
+
+      输出 JSON 格式（与工具返回一致）：
+      {
+        "screened_paper_ids": ["34265844", "38360817", ...],
+        "screened_count": <int>,
+        "excluded": [{"pmid": "12345678", "reason": "...", "relevance": 0.0123}, ...],
+        "screen_summary": "根据标准筛选 N 篇文献，相关 M 篇，排除 K 篇。"
+      }
+    tools_required:
+      - "screen_paper"
+    success_criteria:
+      required_fields:
+        - "screened_paper_ids"
+        - "screen_summary"
+      min_count:
+        screened_paper_ids: 1
+    max_retries: 2
+    db_write_policy: "none"
+
+  - step_id: "download_papers"
+    name: "下载论文全文及补充材料"
+    instruction: |
+      调用 download_paper 工具批量下载上一步产出的 screened_paper_ids，
+      获取 PDF 全文和补充材料。下载失败时仅对可重试的失败 PMID 重试，最多 3 轮。
+
+      输出 JSON 格式：
+      {
+        "download_status": {
+          "total": <int>,
+          "success_count": <int>,
+          "fail_count": <int>,
+          "supplementary_count": <int>,
+          "failed_pmids": [{"pmid": "34265844", "reason": "付费墙限制", "retryable": false}, ...]
+        }
+      }
+    tools_required:
+      - "download_paper"
+    success_criteria:
+      required_fields:
+        - "download_status"
+    max_retries: 3
+    db_write_policy: "none"
