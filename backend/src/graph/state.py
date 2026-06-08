@@ -26,7 +26,6 @@ class PipelineState(TypedDict, total=False):
     # ── 输入字段 ──────────────────────────────────────────────────────────
     query: str
     user_query: str
-    pdf_path: str
     pdf_name: str
 
     # ── Guide Agent 产出（四步确认后产出）────────────────────────────────
@@ -89,12 +88,57 @@ class PipelineState(TypedDict, total=False):
     screen_summary: str
 
     # ── Extract Agent 产出 ────────────────────────────────────────────────
+    extracted_papers: list[dict]
+    """成功抽取的论文结构化记录列表（含 paper 元数据和 fae_records），由 extract_agent 写入。"""
+
+    failed_papers: list[dict]
+    """抽取失败的论文列表及错误原因，由 extract_agent 写入。"""
+
     extracted_record_ids: list[str]
     extract_summary: str
     extraction: dict[str, Any] | None
     """单篇文献的结构化抽取结果。"""
 
     result: dict[str, Any] | None
+
+    # ── 文件资产与 PDF 下载（v0.1）────────────────────────────────────────
+    paper_key: str | None
+    """SHA256(doi/pmid/title)[:16]，文件路径唯一键。"""
+
+    pdf_path: str | None
+    """PDF 绝对路径（容器内），download 工具写入，extract 读取。"""
+
+    download_status: str | None
+    """下载状态：downloaded / already_exists / failed / skipped。"""
+
+    file_sha256: str | None
+    """PDF 文件内容 SHA-256 摘要，用于完整性校验和去重。"""
+
+    # ── RAG / CSV 阶段（v0.1 预留）───────────────────────────────────────
+    rag_csv_dir: str | None
+    """RAG 解析输出的 CSV 文件夹路径。"""
+
+    rag_csv_files: dict | None
+    """各 CSV 文件元信息（{table_name: {path, rows, exists}}）。"""
+
+    ragflow_ref: dict | None
+    """RAGFlow 文档引用信息（{document_id, knowledge_base_id, ...}）。"""
+
+    csv_quality_status: str | None
+    """CSV 质量检查状态（pass / warning / fail）。"""
+
+    csv_quality_issues: list[dict] | None
+    """CSV 质量问题列表（[{field, issue, severity}]）。"""
+
+    # ── 写库阶段（v0.1 预留）─────────────────────────────────────────────
+    extraction_package_path: str | None
+    """打包后的 extraction JSON 路径（含 entities + metadata）。"""
+
+    validation_report_path: str | None
+    """数据库写入前的校验报告路径。"""
+
+    db_write_result: dict | None
+    """数据库写入结果（{paper_id, entities_written, status}）。"""
 
     # ── 通用元数据 ────────────────────────────────────────────────────────
     run_metadata: dict[str, Any]

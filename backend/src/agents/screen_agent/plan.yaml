@@ -35,23 +35,25 @@ steps:
   - step_id: "download_papers"
     name: "下载论文全文及补充材料"
     instruction: |
-      调用 download_paper 工具批量下载上一步产出的 screened_paper_ids，
-      获取 PDF 全文和补充材料。下载失败时仅对可重试的失败 PMID 重试，最多 3 轮。
+      对每篇 screened_paper_ids，逐篇调用 download_paper 工具下载 PDF。
+      每次调用传入单篇文献的 pmid（和可选的 doi），同时传入当前 run_id。
+
+      失败（download_status == "failed"）时记录原因并继续下一篇，不中止流程。
+      对失败文献可重试一次（付费墙、PMID 无效等不可重试）。
 
       输出 JSON 格式：
       {
-        "download_status": {
-          "total": <int>,
-          "success_count": <int>,
-          "fail_count": <int>,
-          "supplementary_count": <int>,
-          "failed_pmids": [{"pmid": "34265844", "reason": "付费墙限制", "retryable": false}, ...]
-        }
+        "download_results": [
+          {"pmid": "34265844", "paper_key": "9f4c2a0d", "download_status": "downloaded"},
+          {"pmid": "38360817", "paper_key": "a1b2c3d4", "download_status": "failed", "message": "付费墙限制"}
+        ],
+        "download_summary": "共下载 N 篇，成功 M 篇，失败 K 篇。"
       }
     tools_required:
       - "download_paper"
     success_criteria:
       required_fields:
-        - "download_status"
-    max_retries: 3
+        - "download_results"
+        - "download_summary"
+    max_retries: 2
     db_write_policy: "none"

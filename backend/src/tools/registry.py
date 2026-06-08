@@ -25,9 +25,42 @@ v0.1 现状：
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from langchain_core.tools import tool
+
+# ─────────────────────────────────────────────
+# 业务 tools（真实实现）
+# ─────────────────────────────────────────────
+try:
+    from backend.src.tools.screen.screen_paper import screen_paper as _real_screen_paper
+    _SCREEN_PAPER_LOADED = True
+except ImportError:
+    _SCREEN_PAPER_LOADED = False
+    _real_screen_paper = None  # type: ignore
+
+# download_paper：根据 GRAPH_AGENT_MODE 决定加载真实版还是 mock 版
+_agent_mode = os.getenv("GRAPH_AGENT_MODE", "demo").lower()
+try:
+    if _agent_mode in ("real",):
+        from backend.src.tools.screen.download_paper import download_paper as _download_paper_tool
+    else:
+        from backend.src.tools.screen.download_paper_mock import download_paper as _download_paper_tool
+    _DOWNLOAD_PAPER_LOADED = True
+except ImportError:
+    _DOWNLOAD_PAPER_LOADED = False
+    _download_paper_tool = None  # type: ignore
+
+# ─────────────────────────────────────────────
+# RAG tools（由 rag/as_tool.py 提供，extract_agent 使用）
+# ─────────────────────────────────────────────
+try:
+    from rag.as_tool import chunk_document, build_rag_index, retrieve_chunks, reset_rag_state
+    _RAG_TOOLS_LOADED = True
+except ImportError:
+    _RAG_TOOLS_LOADED = False
+    chunk_document = build_rag_index = retrieve_chunks = reset_rag_state = None  # type: ignore
 
 # ─────────────────────────────────────────────
 # test_agent 专属 mock tools（懒加载，避免循环依赖）
@@ -111,10 +144,27 @@ def screen_paper(paper_id: str, criteria: str) -> dict[str, Any]:
 # ─────────────────────────────────────────────
 
 _REGISTRY: dict[str, Any] = {
-    # ── 业务 agent tools（stub，真实实现由 tools 负责人替换）──
+    # ── stub tools（v0.1，供测试和缺少依赖时兜底）──
     "pubmed_search": pubmed_search,
-    "screen_paper": screen_paper,
+    "screen_paper":  screen_paper,   # BM25 stub（下方会被真实版覆盖）
 }
+
+# ── 真实 screen_paper（rank-bm25 实现）──
+if _SCREEN_PAPER_LOADED and _real_screen_paper is not None:
+    _REGISTRY["screen_paper"] = _real_screen_paper
+
+# ── download_paper（real 模式加载真实版，其余模式加载 mock 版）──
+if _DOWNLOAD_PAPER_LOADED and _download_paper_tool is not None:
+    _REGISTRY["download_paper"] = _download_paper_tool
+
+# ── RAG tools（extract_agent 的 RAGFlow 工具链，加载失败时跳过）──
+if _RAG_TOOLS_LOADED:
+    _REGISTRY.update({
+        "chunk_document":  chunk_document,   # PDF → chunk 列表
+        "build_rag_index": build_rag_index,  # 构建向量索引
+        "retrieve_chunks": retrieve_chunks,  # 混合检索
+        "reset_rag_state": reset_rag_state,  # 重置 RAG 状态
+    })
 
 # ── test_agent 专属 mock tools（若加载成功则注册）──
 if _TEST_TOOLS_LOADED:
