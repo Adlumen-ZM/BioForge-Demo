@@ -1,0 +1,323 @@
+mapping_version: hap_peptide_v1
+purpose: Map logical template fields to normalized business database write package / PostgreSQL physical tables.
+notes:
+- This file is a mapping contract, not executable SQL.
+- record_function is represented as function_claim in the physical schema.
+- function_assay_evidence is represented by evidence_observation + function_evidence_link + source_location + source_location_link.
+- text_to_* fields are display fields derived from source_location records.
+- Agent must output logical extraction_package; db_access mapping/writer handles physical persistence.
+logical_to_physical:
+  paper:
+    paper:
+    - title
+    - journal_title
+    - publication_year
+    - abstract
+    - full_text_availability
+    - retrieval_source
+    - curator_note
+    paper_identifier:
+    - doi
+    - pmid
+    paper_keyword:
+    - keywords
+  paper_entity_record:
+    paper_entity_record:
+    - entity_name_raw
+    - entity_name_normalized
+    - sequence_status
+    - sequence_raw
+    - sequence_normalized
+    - is_sequence_backfilled
+    - sequence_source_type
+    - sequence_source_id
+    - source_paper_id
+    - sequence_source_location
+    - text_to_sequence_source
+    - entity_type
+    - design_source_raw
+    - design_source
+    - entity_carrier_raw
+    - entity_carrier_type
+    - application_form
+    - target_material_raw
+    - target_material
+    - target_substrate_raw
+    - target_substrate
+    - evidence_overall_level
+    - model_system_summary
+    - curator_note
+    source_location:
+    - seq_section_path
+    - seq_subsection_label
+    - seq_figure_ref
+    - seq_table_ref
+    - seq_page_no
+    derived:
+    - summary_functions
+    - text_to_sequence
+    - trace_status
+  entity_component:
+    entity_component:
+    - component_order
+    - component_type
+    - component_name_raw
+    - component_sequence
+    - is_natural
+    - modification_category
+    - modification_detail
+    - parent_protein_raw
+    - parent_protein_accession
+    - fragment_start
+    - fragment_end
+    - fragment_derivation_type
+    - curator_note
+  record_function:
+    function_claim:
+    - function_layer
+    - function_label
+    - function_source_raw
+    - evidence_level
+    - curator_note
+    source_location:
+    - func_section_path
+    - func_subsection_label
+    - func_figure_ref
+    - func_table_ref
+    - func_page_no
+    derived:
+    - text_to_function
+    - trace_status
+  function_assay_evidence:
+    evidence_observation:
+    - evidence_level
+    - additive_system_raw
+    - additive_system_type
+    - delivery_mode
+    - assay_category
+    - validation_method_raw
+    - validation_method
+    - readout_main
+    - result_text_summary
+    - result_value_raw
+    - result_value_normalized
+    - curator_note
+    function_evidence_link:
+    - function_id
+    - evidence_id
+    source_location:
+    - section_path
+    - subsection_label
+    - figure_ref
+    - table_ref
+    - page_no
+    - quote_snippet
+    - offset_start
+    - offset_end
+    - location_type
+    derived:
+    - text_to_evidence
+    - trace_status
+controlled_vocabulary:
+  full_text_availability:
+  - open_access
+  - subscription
+  - preprint
+  - unknown
+  retrieval_source:
+  - pubmed
+  - crossref
+  - manual_entry
+  - agent_crawl
+  sequence_status:
+  - explicit
+  - partial
+  - not_reported
+  - backtrace_required
+  sequence_source_type:
+  - ref
+  - genbank
+  - uniprot
+  - suppl
+  - patent
+  - database
+  - other
+  entity_type:
+  - single_peptide
+  - fusion_peptide
+  - chimeric_peptide
+  - protein_fragment
+  - full_protein
+  - modified_peptide
+  - other
+  design_source:
+  - natural_derived
+  - rational_design
+  - phage_display
+  - computational
+  - synthetic
+  - unclear
+  entity_carrier_type:
+  - hydrogel
+  - protein_matrix
+  - polysaccharide_matrix
+  - coating
+  - scaffold
+  - composite
+  - other
+  - unclear
+  - none
+  application_form:
+  - free_peptide
+  - coated
+  - carrier_system
+  - multiple
+  - unclear
+  target_material:
+  - HAp
+  - collagen
+  - ACP
+  - other
+  - not_reported
+  - unclear
+  target_substrate:
+  - enamel
+  - dentin
+  - bone
+  - mineral_surface
+  - in_vitro_crystal
+  - other
+  - not_reported
+  - unclear
+  function_layer:
+  - binding
+  - kinetics
+  - crystallography
+  - protection
+  - biology
+  - other
+  function_label:
+  - adsorption
+  - localization
+  - ion_capture
+  - nucleation
+  - mineral_deposition
+  - crystal_growth_promotion
+  - phase_stabilization
+  - phase_transformation_promotion
+  - crystal_growth_inhibition
+  - crystal_orientation_modulation
+  - crystal_morphology_modulation
+  - anti_demineralization
+  - antimicrobial
+  - cell_adhesion_promotion
+  - other
+  evidence_level:
+  - in_vitro
+  - ex_vivo
+  - animal_in_vivo
+  - clinical
+  - in_silico
+  - unclear
+  section_path:
+  - Abstract
+  - Introduction
+  - Methods
+  - Results
+  - Discussion
+  - Conclusion
+  - Supplementary
+  trace_status:
+  - complete
+  - partial
+  - missing
+  - disputed
+  additive_system_type:
+  - free_in_solution
+  - hydrogel
+  - protein_matrix
+  - polysaccharide_matrix
+  - coating
+  - scaffold
+  - composite
+  - other
+  - unclear
+  - none
+  delivery_mode:
+  - free_solution
+  - surface_coating
+  - sustained_release
+  - immobilized
+  - pretreatment
+  - co_assembly
+  - other
+  - unclear
+  assay_category:
+  - binding_affinity
+  - surface_localization
+  - retention_test
+  - crystal_structure
+  - mineral_morphology
+  - elemental_composition
+  - molecular_composition
+  - mechanical_property
+  - mineral_quantity
+  - lesion_morphology
+  - biological_response
+  - in_vivo_efficacy
+  - simulation
+  - other
+  validation_method:
+  - CLSM
+  - fluorescence_microscopy
+  - micro-CT
+  - nanoindentation
+  - SEM
+  - TEM
+  - AFM
+  - XRD
+  - FTIR
+  - EDX
+  - ICP-OES
+  - SPR
+  - ITC
+  - ELISA
+  - MTT
+  - molecular_docking
+  - MD_simulation
+  - other
+  - unclear
+  location_type:
+  - summary
+  - detailed
+  - figure_legend
+  - supplementary
+  component_type:
+  - functional_module
+  - linker
+  - tag
+  - protein_fragment
+  - modification
+  - carrier
+  - other
+  modification_category:
+  - post_translational
+  - chemical_conjugation
+  - non_natural_aa
+  - terminal_modification
+  - cross_linking
+  - other
+  fragment_derivation_type:
+  - n_terminal
+  - c_terminal
+  - internal
+  - full_length
+writer_expectation:
+  input: logical extraction_package validated against schema.yaml / Pydantic schema
+  entrypoint: save_extraction_package(conn, payload, run_id=None)
+  requirements:
+  - single transaction
+  - idempotent upsert
+  - business_object_registry registration
+  - source_location linking
+  - workflow_extraction_call audit
