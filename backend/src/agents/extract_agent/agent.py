@@ -35,7 +35,7 @@ def create_extract_agent(model: str = None) -> AgentTemplate:
         2. 取消 plan.yaml 中 RAG 步骤的注释
         3. 取消下方 tools 参数的注释
     """
-    model = model or os.getenv("DEFAULT_LLM_MODEL", "deepseek/deepseek-chat")
+    model = model or os.getenv("DEFAULT_LLM_MODEL", "minimax/MiniMax-M2.7-highspeed")
     config = AgentTemplateConfig(
         agent_name="extract_agent",
         plan_path=_AGENT_DIR / "plan.yaml",
