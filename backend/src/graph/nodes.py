@@ -2,20 +2,14 @@
 nodes.py — BioForge LangGraph 节点定义
 
 位置：backend/src/graph/
-依赖：guide_agent/agent.py（build_guide_node）
-      search_agent/agent.py（create_search_agent）
-      graph/state.py（PipelineState）
 职责：将各 agent 包装为 LangGraph 节点函数，供 pipeline.py 注册到 StateGraph。
 
-节点顺序（见 pipeline.py）：
-  START → guide → search → screen → extract → END
+节点顺序：guide → search → screen → extract
 
-guide  节点：通过 LangGraph interrupt() 与用户三步对话，
-             产出任务描述/字段模板/准入标准（三件核心物）
-             此节点使用 interrupt()，需要 checkpointer 才能 resume
-search 节点：调用 SearchAgent 检索 PubMed，产出候选文献 ID 列表
-screen 节点：调用 ScreenAgent 相关性筛选（v0.1 stub，直通）
-extract节点：调用 ExtractAgent 结构化抽取（v0.1 stub，直通）
+guide  节点：通过 LangGraph interrupt() 三步对话产出三件核心物，需要 checkpointer
+search 节点：调用 SearchAgent 检索 PubMed
+screen 节点：调用 ScreenAgent 相关性筛选
+extract节点：调用 ExtractAgent 结构化抽取
 """
 
 from __future__ import annotations
@@ -23,21 +17,12 @@ from __future__ import annotations
 import os
 from typing import Any
 
-# ── 引导节点：不走 AgentTemplate，见 guide_agent/agent.py 顶部说明 ──────────
 from backend.src.agents.guide_agent.agent import build_guide_node
-
-# ── 检索节点：走 AgentTemplate（Plan-and-Execute）────────────────────────────
-try:
-    from backend.src.agents.search_agent.agent import create_search_agent
-    _SEARCH_AVAILABLE = True
-except ImportError:
-    print("[nodes] ⚠️ search_agent 导入失败，search_node 将使用 stub")
-    create_search_agent = None  # type: ignore
-    _SEARCH_AVAILABLE = False
+from .factory import create_agent, get_agent_mode
+from .state import PipelineState
 
 
-# ── 引导节点（guide_node）────────────────────────────────────────────────────
-# 使用 LangGraph interrupt() 机制暂停等待用户输入，需要 checkpointer 支持
+# ── Guide 节点（interrupt 机制，不走 AgentTemplate）────────────────────────
 # mode 和 model 从环境变量读取，允许运行时覆盖
 guide_node = build_guide_node(
     mode=os.getenv("GRAPH_AGENT_MODE", "mock"),
@@ -45,94 +30,118 @@ guide_node = build_guide_node(
 )
 
 
-# ── 检索节点（search_node）────────────────────────────────────────────────────
-def search_node(state: Any) -> dict:
-    """检索节点：调用 SearchAgent 检索 PubMed，产出候选文献 ID 列表。
+def _mode(state: PipelineState) -> str:
+    return get_agent_mode(state.get("agent_mode"))
 
-    Args:
-        state: PipelineState（含 run_id / task_description / query 等）。
 
-    Returns:
-        dict patch，含 candidate_paper_ids 和 search_summary。
-    """
-    if not _SEARCH_AVAILABLE or create_search_agent is None:
-        # search_agent 不可用时返回空结果（不崩溃）
-        return {
-            "candidate_paper_ids": [],
-            "search_summary": "search_agent 不可用，跳过检索",
-            "ok": False,
+def _existing_errors(state: PipelineState) -> list[dict[str, Any]]:
+    return list(state.get("errors") or [])
+
+
+def _error(agent_name: str, message: str) -> dict[str, Any]:
+    return {"agent": agent_name, "message": message}
+
+
+def _is_ok(output: dict[str, Any]) -> bool:
+    if "ok" in output:
+        return bool(output["ok"])
+    metadata = output.get("run_metadata") or {}
+    return metadata.get("status") in {None, "success"}
+
+
+def search_node(state: PipelineState) -> dict[str, Any]:
+    agent = create_agent("search_agent", _mode(state))
+    output = agent.run(
+        {
+            "run_id": state.get("run_id"),
+            "query": state.get("query") or state.get("user_query"),
+            "user_query": state.get("user_query") or state.get("query"),
+            "pdf_path": state.get("pdf_path"),
+            "pdf_name": state.get("pdf_name"),
         }
+    )
 
-    try:
-        # 从 state 读取 run_id（用于 trace 关联）
-        run_id = state.get("run_id") if hasattr(state, "get") else None
-        # 从 state 读取运行模式，决定使用 mock 还是 real agent
-        mode   = os.getenv("GRAPH_AGENT_MODE", "mock")
-        model  = os.getenv("DEFAULT_LLM_MODEL")
+    ok = _is_ok(output)
+    updates: dict[str, Any] = {
+        "current_stage": "screen",
+        "ok": ok,
+        "message": output.get("message") or output.get("search_summary") or output.get("search_agent_summary"),
+        "candidate_paper_ids": list(output.get("candidate_paper_ids") or []),
+        "candidates": list(output.get("candidates") or []),
+        "search_summary": output.get("search_summary") or output.get("search_agent_summary") or "",
+    }
+    if "run_metadata" in output:
+        updates["run_metadata"] = output["run_metadata"]
+    if not ok:
+        updates["current_stage"] = "error"
+        updates["errors"] = _existing_errors(state) + [
+            _error("search_agent", updates["message"] or "search_agent failed")
+        ]
+    return updates
 
-        # 创建 SearchAgent 实例并运行
-        agent = create_search_agent(model=model) if model else create_search_agent()
-        patch = agent.run(pipeline_state=dict(state), run_id=run_id)
-        patch["ok"] = True
-        return patch
 
-    except Exception as e:
-        # search_agent 运行失败不崩溃，返回失败状态
-        print(f"[search_node] ❌ SearchAgent 运行失败：{e}")
-        return {
-            "candidate_paper_ids": [],
-            "search_summary":      f"SearchAgent 运行失败：{e}",
-            "ok":                  False,
+def screen_node(state: PipelineState) -> dict[str, Any]:
+    agent = create_agent("screen_agent", _mode(state))
+    output = agent.run(
+        {
+            "run_id": state.get("run_id"),
+            "query": state.get("query") or state.get("user_query"),
+            "candidate_paper_ids": state.get("candidate_paper_ids") or [],
+            "candidates": state.get("candidates") or [],
+            "search_summary": state.get("search_summary"),
         }
-
-
-# ── 筛选节点（screen_node）────────────────────────────────────────────────────
-def screen_node(state: Any) -> dict:
-    """筛选节点：调用 ScreenAgent 相关性筛选。
-
-    v0.1 状态：ScreenAgent 尚未实现，直通（将所有候选文献视为通过筛选）。
-
-    Args:
-        state: PipelineState（含 candidate_paper_ids / inclusion_criteria 等）。
-
-    Returns:
-        dict patch，含 screened_paper_ids 和 screen_summary。
-    """
-    # v0.1 stub：直通，将 candidate_paper_ids 作为 screened_paper_ids 返回
-    candidate_ids = (
-        state.get("candidate_paper_ids", [])
-        if hasattr(state, "get") else []
     )
-    return {
-        "screened_paper_ids": candidate_ids,
-        "screen_summary":     f"screen_agent v0.1 stub：直通 {len(candidate_ids)} 篇",
-        "ok":                 True,
+
+    ok = _is_ok(output)
+    updates: dict[str, Any] = {
+        "current_stage": "extract",
+        "ok": ok,
+        "message": output.get("message") or output.get("screen_summary") or output.get("screen_agent_summary"),
+        "screened_paper_ids": list(output.get("screened_paper_ids") or []),
+        "selected_paper": output.get("selected_paper"),
+        "screen_summary": output.get("screen_summary") or output.get("screen_agent_summary") or "",
     }
+    if "run_metadata" in output:
+        updates["run_metadata"] = output["run_metadata"]
+    if not ok:
+        updates["current_stage"] = "error"
+        updates["errors"] = _existing_errors(state) + [
+            _error("screen_agent", updates["message"] or "screen_agent failed")
+        ]
+    return updates
 
 
-# ── 抽取节点（extract_node）──────────────────────────────────────────────────
-def extract_node(state: Any) -> dict:
-    """抽取节点：调用 ExtractAgent 结构化抽取。
-
-    v0.1 状态：ExtractAgent 尚未实现，直通（不做实际抽取）。
-
-    Args:
-        state: PipelineState（含 screened_paper_ids / db_schema 等）。
-
-    Returns:
-        dict patch，含 extracted_record_ids 和 extract_summary。
-    """
-    # v0.1 stub：直通，不做实际抽取
-    screened_ids = (
-        state.get("screened_paper_ids", [])
-        if hasattr(state, "get") else []
+def extract_node(state: PipelineState) -> dict[str, Any]:
+    agent = create_agent("extract_agent", _mode(state))
+    output = agent.run(
+        {
+            "run_id": state.get("run_id"),
+            "pdf_path": state.get("pdf_path"),
+            "pdf_name": state.get("pdf_name"),
+            "screened_paper_ids": state.get("screened_paper_ids") or [],
+            "selected_paper": state.get("selected_paper"),
+            "screen_summary": state.get("screen_summary"),
+        }
     )
-    return {
-        "extracted_record_ids": [],
-        "extract_summary":      f"extract_agent v0.1 stub：待抽取 {len(screened_ids)} 篇，暂未实现",
-        "ok":                   True,
+
+    ok = _is_ok(output)
+    extraction = output.get("extraction")
+    updates: dict[str, Any] = {
+        "current_stage": "done" if ok else "error",
+        "ok": ok,
+        "message": output.get("message") or output.get("extract_summary") or output.get("extract_agent_summary"),
+        "extracted_record_ids": list(output.get("extracted_record_ids") or []),
+        "extract_summary": output.get("extract_summary") or output.get("extract_agent_summary") or "",
+        "extraction": extraction,
+        "result": extraction if ok else None,
     }
+    if "run_metadata" in output:
+        updates["run_metadata"] = output["run_metadata"]
+    if not ok:
+        updates["errors"] = _existing_errors(state) + [
+            _error("extract_agent", updates["message"] or "extract_agent failed")
+        ]
+    return updates
 
 
-# ── 公开接口 ──────────────────────────────────────────────────────────────────
-__all__ = ["guide_node", "search_node", "screen_node", "extract_node"]
+__all__ = ["extract_node", "screen_node", "search_node"]

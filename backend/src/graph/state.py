@@ -1,19 +1,9 @@
 """
-state.py — LangGraph 流水线状态定义
+state.py — BioForge LangGraph 流水线共享状态
 
-位置：graph 层，被 graph/pipeline.py 中的 StateGraph 和各 agent 的 output_adapter 使用。
-职责：定义 PipelineState TypedDict，是三个 agent（search/screen/extract）之间
-     传递结构化结果的唯一通道。
-
-设计原则：
-  - 只传轻量结构化结果 + 压缩摘要，不传完整 ReAct messages 历史。
-  - 各 agent 的 output_adapter 生成 patch dict，graph node 负责 merge 进此 state。
-  - 字段按 agent 阶段分组，便于各阶段 agent 读写对应字段。
-
-扩展点：
-  - 新增 agent 阶段时，在对应分组下添加新字段即可。
-  - 需要更复杂的 state 合并策略（如 list append 而非覆盖），
-    可改用 LangGraph Annotated + operator.add 装饰器。
+位置：backend/src/graph/
+职责：定义 PipelineState TypedDict，是 guide/search/screen/extract
+     四个 agent 之间传递结构化结果的唯一通道。
 """
 
 from __future__ import annotations
@@ -23,66 +13,77 @@ from typing_extensions import TypedDict
 
 
 class PipelineState(TypedDict, total=False):
-    """BioForge 三段式流水线的共享状态。
+    """BioForge 四段式流水线的共享状态（guide → search → screen → extract）。"""
 
-    total=False 表示所有字段均为可选，各 agent 只写自己产出的字段，
-    graph 层按需读取，未写入的字段为 undefined（不是 None）。
+    # ── 通用运行标识 ──────────────────────────────────────────────────────
+    agent_mode: str
+    """运行模式（"mock" / "real"），由 CLI 写入，各节点读取。"""
 
-    字段命名规范：
-      <agent>_summary — 各 agent 的摘要文本（由 output_adapter 生成）
-      候选/过滤结果字段 — 跨 agent 传递的核心数据
-      run_metadata — 最后一次 run 的元数据（调试用）
-    """
-
-    # ── Search Agent 产出 ─────────────────────────────────────────────────
-    candidate_paper_ids: list[str]
-    """检索到的候选文献 ID 列表（PubMed ID 或 DOI），由 search_agent 写入。"""
-
-    search_summary: str
-    """search_agent 的运行摘要（不超过 200 字），由 output_adapter 生成。"""
-
-    # ── Screen Agent 产出 ─────────────────────────────────────────────────
-    screened_paper_ids: list[str]
-    """经相关性筛选后保留的文献 ID 列表，由 screen_agent 写入。"""
-
-    screen_summary: str
-    """screen_agent 的运行摘要，由 output_adapter 生成。"""
-
-    # ── Extract Agent 产出 ────────────────────────────────────────────────
-    extracted_record_ids: list[str]
-    """成功抽取并写入数据库的记录 ID 列表，由 extract_agent 写入。"""
-
-    extract_summary: str
-    """extract_agent 的运行摘要，由 output_adapter 生成。"""
-
-    # ── Trace 关联 ────────────────────────────────────────────────────────
+    project_id: str
     run_id: str
-    """pipeline 级别 run_id（由 graph/pipeline.py 生成，格式如 "pipe_<uuid4_hex[:12]>"）。
-    通过 agent.run(run_id=state["run_id"]) 传入各 AgentTemplate，
-    确保同一 pipeline run 的所有 trace 事件共享同一 run_id，便于在 DB 中聚合查询。
-    独立调试（不走 pipeline）时可不传，TraceHook 会自动使用 agent_run_id 作为 fallback。
-    （Trace MVP 新增，total=False 保证旧代码不传此字段时不报错）
-    """
+    """pipeline 级别 run_id（格式 "pipe_<hex12>"），trace 事件共享此 ID。"""
+
+    # ── 输入字段 ──────────────────────────────────────────────────────────
+    query: str
+    user_query: str
+    pdf_path: str
+    pdf_name: str
 
     # ── Guide Agent 产出（三件核心物）────────────────────────────────────
     # 由 guide_agent 通过三步 interrupt 对话产出，search/screen/extract 均可读取
     task_description: str
-    """引导员产出的自然语言任务描述（3-5句话），供 pipeline 各阶段参考。
+    """引导员产出的自然语言任务描述（3-5 句话），供 pipeline 各阶段参考。
     由 guide_agent 在第一个 interrupt 确认后写入。"""
 
     db_schema: dict
     """引导员产出的数据库字段模板（字段名 → {type, description, example}）。
-    由 guide_agent 在第二个 interrupt 确认后写入，extract_agent 据此决定抽取哪些字段。"""
+    由 guide_agent 在第二个 interrupt 确认后写入，extract_agent 据此决定抽取字段。"""
 
     inclusion_criteria: dict
     """引导员产出的文献准入/排除标准（{inclusion: list, exclusion: list}）。
-    由 guide_agent 在第三个 interrupt 确认后写入，screen_agent 据此进行相关性筛选。"""
+    由 guide_agent 在第三个 interrupt 确认后写入，screen_agent 据此筛选。"""
 
     user_confirmed: bool
-    """用户是否完成引导阶段所有三步确认（任务描述/字段模板/准入标准均已确认）。
-    guide_agent 完成后设为 True，供后续节点检查引导阶段是否已完成。"""
+    """用户是否完成引导阶段所有三步确认，guide_agent 完成后设为 True。"""
+
+    # ── 流水线状态 ────────────────────────────────────────────────────────
+    current_stage: str
+    """当前所处阶段（"init" / "search" / "screen" / "extract" / "done" / "error"）。"""
+
+    ok: bool
+    message: str | None
+    errors: list[dict[str, Any]]
+
+    # ── Search Agent 产出 ─────────────────────────────────────────────────
+    candidate_paper_ids: list[str]
+    """检索到的候选文献 ID 列表（PubMed ID 或 DOI）。"""
+
+    candidates: list[dict[str, Any]]
+    """候选文献的元数据列表（title/abstract/doi 等），由 search_agent 写入。"""
+
+    search_summary: str
+
+    # ── Screen Agent 产出 ─────────────────────────────────────────────────
+    screened_paper_ids: list[str]
+    selected_paper: dict[str, Any] | None
+    """当前选中处理的单篇文献（screen_agent 写入，extract_agent 读取）。"""
+
+    screen_summary: str
+
+    # ── Extract Agent 产出 ────────────────────────────────────────────────
+    extracted_record_ids: list[str]
+    extract_summary: str
+    extraction: dict[str, Any] | None
+    """单篇文献的结构化抽取结果。"""
+
+    result: dict[str, Any] | None
 
     # ── 通用元数据 ────────────────────────────────────────────────────────
     run_metadata: dict[str, Any]
-    """最后一次 agent run 的元数据（run_id / agent_name / status / step_count），
-    主要用于调试和日志关联，graph 层不依赖此字段做决策。"""
+    """最后一次 agent run 的元数据，主要用于调试和日志关联。"""
+
+
+GraphState = PipelineState
+PaperState = PipelineState
+
+__all__ = ["GraphState", "PaperState", "PipelineState"]

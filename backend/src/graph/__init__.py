@@ -1,10 +1,6 @@
-"""
-backend/src/graph/__init__.py
+"""backend/src/graph/__init__.py — graph 包公开接口"""
 
-graph 包的公开接口。
-导出 build_graph 供 CLI 和测试代码使用。
-"""
+from .pipeline import build_graph, graph
+from .state import GraphState, PaperState, PipelineState
 
-from .pipeline import build_graph
-
-__all__ = ["build_graph"]
+__all__ = ["GraphState", "PaperState", "PipelineState", "build_graph", "graph"]
