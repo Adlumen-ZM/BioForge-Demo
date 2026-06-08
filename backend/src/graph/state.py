@@ -64,6 +64,24 @@ class PipelineState(TypedDict, total=False):
     （Trace MVP 新增，total=False 保证旧代码不传此字段时不报错）
     """
 
+    # ── Guide Agent 产出（三件核心物）────────────────────────────────────
+    # 由 guide_agent 通过三步 interrupt 对话产出，search/screen/extract 均可读取
+    task_description: str
+    """引导员产出的自然语言任务描述（3-5句话），供 pipeline 各阶段参考。
+    由 guide_agent 在第一个 interrupt 确认后写入。"""
+
+    db_schema: dict
+    """引导员产出的数据库字段模板（字段名 → {type, description, example}）。
+    由 guide_agent 在第二个 interrupt 确认后写入，extract_agent 据此决定抽取哪些字段。"""
+
+    inclusion_criteria: dict
+    """引导员产出的文献准入/排除标准（{inclusion: list, exclusion: list}）。
+    由 guide_agent 在第三个 interrupt 确认后写入，screen_agent 据此进行相关性筛选。"""
+
+    user_confirmed: bool
+    """用户是否完成引导阶段所有三步确认（任务描述/字段模板/准入标准均已确认）。
+    guide_agent 完成后设为 True，供后续节点检查引导阶段是否已完成。"""
+
     # ── 通用元数据 ────────────────────────────────────────────────────────
     run_metadata: dict[str, Any]
     """最后一次 agent run 的元数据（run_id / agent_name / status / step_count），

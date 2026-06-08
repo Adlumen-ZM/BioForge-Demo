@@ -28,6 +28,11 @@ psycopg[binary]>=3.1
 # ==================== 算子调优工具（scripts/debugger/ Streamlit UI） ====================
 streamlit>=1.35.0
 
+# ==================== 对话式 CLI（backend/src/cli/） ====================
+# rich：终端 UI 库，提供 Panel/Table/Live 进度面板和 ANSI 颜色支持
+# 已是 streamlit 的间接依赖，此处显式声明以确保版本和可用性
+rich>=13.0
+
 # ==================== 可观测性（LLM Tracing） ====================
 # Langfuse：LLM 全链路追踪（token/cost/latency/prompt-output）
 # 配置 LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY 后自动启用，未配置时静默跳过
