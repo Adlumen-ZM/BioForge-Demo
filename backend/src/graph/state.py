@@ -29,22 +29,40 @@ class PipelineState(TypedDict, total=False):
     pdf_path: str
     pdf_name: str
 
-    # ── Guide Agent 产出（三件核心物）────────────────────────────────────
-    # 由 guide_agent 通过三步 interrupt 对话产出，search/screen/extract 均可读取
+    # ── Guide Agent 产出（四步确认后产出）────────────────────────────────
+    # 由 guide_agent 通过四步 interrupt 对话产出（Q1→Q2→Q3→Q4）
+
+    # 旧字段（向后兼容保留，guide_agent v2 不再写入）
     task_description: str
-    """引导员产出的自然语言任务描述（3-5 句话），供 pipeline 各阶段参考。
-    由 guide_agent 在第一个 interrupt 确认后写入。"""
-
     db_schema: dict
-    """引导员产出的数据库字段模板（字段名 → {type, description, example}）。
-    由 guide_agent 在第二个 interrupt 确认后写入，extract_agent 据此决定抽取字段。"""
-
     inclusion_criteria: dict
-    """引导员产出的文献准入/排除标准（{inclusion: list, exclusion: list}）。
-    由 guide_agent 在第三个 interrupt 确认后写入，screen_agent 据此筛选。"""
 
     user_confirmed: bool
-    """用户是否完成引导阶段所有三步确认，guide_agent 完成后设为 True。"""
+    """用户是否完成引导阶段所有确认，guide_agent 完成后设为 True。"""
+
+    # 新字段（guide_agent v2 输出，供 search / screen / extract 读取）
+    raw_user_prompt: str
+    """用户原始任务描述（未经处理的自然语言输入）。"""
+
+    raw_user_screening_rules: dict
+    """用户原始纳排规则（easy 版本，不直接传入 pipeline）。"""
+
+    refined_task_prompt: str
+    """Guide Agent 规范化后的任务描述（供 search / extract 参考）。"""
+
+    refined_screening_criteria: dict
+    """Guide Agent 系统化纳排标准（{version, inclusion, exclusion, borderline_rules}），
+    供 screen_agent 读取。"""
+
+    schema_template: dict
+    """固定数据库字段模板元数据（{template_id, schema_template_path, schema_file, filling_rules_file}），
+    template_id 强制为 hap_peptide_v1，供 extract_agent 和写库层读取。"""
+
+    guide_questions: list
+    """四步确认记录（[{id, topic, confirmed}, ...]），用于审计和日志。"""
+
+    guide_summary: str
+    """Guide Agent 完成后的一句话摘要。"""
 
     # ── 流水线状态 ────────────────────────────────────────────────────────
     current_stage: str

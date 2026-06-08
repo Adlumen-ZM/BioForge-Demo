@@ -40,6 +40,12 @@ _AGENTS = {
         "screen_agent":  MockScreenAgent,
         "extract_agent": MockExtractAgent,
     },
+    # demo 模式：guide agent 正常调用 LLM，search/screen/extract 使用 mock（demo 阶段）
+    "demo": {
+        "search_agent":  _wrap_search("mock"),
+        "screen_agent":  MockScreenAgent,
+        "extract_agent": MockExtractAgent,
+    },
     "real": {
         "search_agent":  _wrap_search("real"),
         "screen_agent":  RealScreenAgent,

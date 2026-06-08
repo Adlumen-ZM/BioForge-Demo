@@ -15,7 +15,7 @@ services:
       - PYTHONUNBUFFERED=1
       - BIZ_DB_PATH=/app/data/hap_v01.db
       - TRACE_DB_PATH=/app/data/hap_trace.db
-      - GRAPH_AGENT_MODE=mock
+      - GRAPH_AGENT_MODE=demo
 
     working_dir: /app
     restart: "no"

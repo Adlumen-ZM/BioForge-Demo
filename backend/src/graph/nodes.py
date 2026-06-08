@@ -23,9 +23,10 @@ from .state import PipelineState
 
 
 # ── Guide 节点（interrupt 机制，不走 AgentTemplate）────────────────────────
-# mode 和 model 从环境变量读取，允许运行时覆盖
+# GRAPH_AGENT_MODE=demo 时使用 DemoGuideAgent（正常调用 LLM）
+# GRAPH_AGENT_MODE=real 时使用 RealGuideAgent（任意任务模式，v0.1 暂降级到 demo）
 guide_node = build_guide_node(
-    mode=os.getenv("GRAPH_AGENT_MODE", "mock"),
+    mode=os.getenv("GRAPH_AGENT_MODE", "demo"),
     model=os.getenv("DEFAULT_LLM_MODEL"),
 )
 

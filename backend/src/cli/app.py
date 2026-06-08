@@ -69,7 +69,9 @@ def print_banner(results: list[dict]) -> None:
     Args:
         results: 来自 run_system_check() 的检测结果列表。
     """
-    mode = os.getenv("GRAPH_AGENT_MODE", "mock").upper()
+    # Demo 模式下固定显示 "Demo"，不直接显示 env var 的 "mock" 字符串
+    raw_mode = os.getenv("GRAPH_AGENT_MODE", "demo").lower()
+    mode     = "Demo" if raw_mode in ("demo", "mock") else raw_mode.upper()
 
     # ── 大型 Logo ─────────────────────────────────────────────────────────────
     logo = Text()
@@ -155,7 +157,7 @@ def main():
     # MemorySaver 提供 interrupt/resume 所需的检查点支持（进程内有效）
     checkpointer = MemorySaver()
 
-    mode  = os.getenv("GRAPH_AGENT_MODE", "mock")
+    mode  = os.getenv("GRAPH_AGENT_MODE", "demo")
     graph = build_graph(mode=mode, checkpointer=checkpointer)
 
     input_data = {"run_id": run_id}

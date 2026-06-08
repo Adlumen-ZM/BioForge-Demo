@@ -1,0 +1,74 @@
+# demo_hap_peptide_v1_questions.yaml
+# Guide Agent Demo 版 4 个确认问题的结构化配置
+# 代码从此文件加载问题内容，构造 interrupt payload
+# 业务文本在此，Python 代码只负责加载和传递
+
+default_user_prompt: |
+  我想构建一个关于羟基磷灰石/磷酸钙矿物体系中肽段作用的结构化数据库。
+  重点关注这些肽段是否能够吸附 HAp、调控矿化、促进牙釉质或牙本质再矿化。
+  希望系统检索 PubMed 文献，并从符合条件的文献中提取肽段序列、作用材料、
+  实验体系、功能结论和实验结果。
+
+default_query: >-
+  HAp/calcium phosphate/enamel/dentin mineralization-related peptides
+  with explicit or traceable sequences
+
+questions:
+  - id: Q1
+    type: q1_goal_confirm
+    label: 研究目标确认
+    content: >-
+      系统检索 HAp、apatite、calcium phosphate、ACP、牙釉质、牙本质及相关钙磷矿化
+      体系中，具有明确序列或可回溯序列来源的肽段、短肽、蛋白片段或功能域研究，
+      并结构化提取其在矿物吸附、成核、晶体生长、矿物沉积、抗脱矿和再矿化中的作用证据。
+    topic: research_goal_confirmation
+    options:
+      - 确认
+    default: 0
+
+  - id: Q2
+    type: q2_boundary_confirm
+    label: 研究对象边界确认
+    inclusion:
+      - 人工合成肽、短肽、寡肽
+      - 天然蛋白来源肽段
+      - 牙釉质、牙本质、唾液或骨相关蛋白片段
+      - 可明确拆分序列边界的功能域
+      - 肽库筛选得到的候选肽段
+    exclusion:
+      - 无法拆分具体序列模块的完整蛋白整体研究
+      - 没有序列、也没有序列来源的肽段描述
+      - 只讨论材料本身而没有肽段对象的研究
+    topic: research_object_boundary_confirmation
+    options:
+      - 确认
+    default: 0
+
+  - id: Q3
+    type: q3_schema_confirm
+    label: 数据库字段模板确认
+    template_id: hap_peptide_v1
+    schema_path: docs/schema_templates/hap_peptide_v1/schema.yaml
+    filling_rules_path: docs/schema_templates/hap_peptide_v1/filling_rules.md
+    description: >-
+      该模板用于记录：论文元数据、肽段或蛋白片段对象、序列与序列来源、
+      作用材料和矿化基质、功能结论、实验方法与结果、证据强度和原文溯源信息。
+    topic: schema_template_confirmation
+    options:
+      - 确认
+    default: 0
+
+  - id: Q4
+    type: q4_pipeline_start
+    label: 是否进入 pipeline
+    content: guide → search → screen → extract → database write
+    topic: pipeline_start_confirmation
+    options:
+      - 开始
+    default: 0
+
+schema_template:
+  template_id: hap_peptide_v1
+  schema_template_path: docs/schema_templates/hap_peptide_v1/
+  schema_file: docs/schema_templates/hap_peptide_v1/schema.yaml
+  filling_rules_file: docs/schema_templates/hap_peptide_v1/filling_rules.md

@@ -2,25 +2,23 @@
 backend/src/agents/guide_agent/agent.py — 引导员 Agent 实现
 
 位置：backend/src/agents/guide_agent/
-依赖：litellm（LLM 调用），yaml（identity 加载），pathlib（文件系统）
+依赖：litellm（LLM 调用），yaml（identity/配置加载），pydantic（输出校验）
       langgraph.types.interrupt（interrupt 机制，只在 build_guide_node 内调用）
 
 职责：
-  通过三步 LLM 调用 + LangGraph interrupt()，与用户确认"三件核心物"：
-    1. task_description  — 自然语言任务描述（search/screen/extract 各阶段参考）
-    2. db_schema         — 数据库字段模板（extract_agent 抽取依据）
-    3. inclusion_criteria— 文献准入/排除标准（screen_agent 筛选依据）
+  通过 4 步 LangGraph interrupt 对话，引导用户确认任务范围，产出：
+    1. refined_task_prompt       — 规范化任务描述（供 search/extract 参考）
+    2. refined_screening_criteria— 系统化纳入/排除标准（供 screen 参考）
+    3. schema_template           — 数据库字段模板元数据（固定 hap_peptide_v1）
 
-与 graph 的关系：
-  build_guide_node() 返回一个符合 LangGraph node 签名的函数 guide_node(state) -> dict。
-  guide_node 是唯一调用 interrupt() 的地方（LangGraph 要求 interrupt 在 graph node 调用栈内）。
-  MockGuideAgent / RealGuideAgent 只准备 payload 数据，不调用 interrupt。
+4 步确认：
+  Q1 研究目标确认 → Q2 研究对象边界确认 → Q3 字段模板确认 → Q4 进入 pipeline
 
-为什么不走 AgentTemplate：
-  AgentTemplate 是 Plan-and-Execute 模板，有 plan.yaml 和多步 executor。
-  guide_agent 没有预定义步骤（无 plan.yaml），也没有业务工具（interrupt 不是 @tool），
-  形态是直接 litellm.completion() 三次调用 + interrupt 暂停，与 AgentTemplate 不匹配。
-  因此 guide_agent 独立实现，不引用 agent_template/ 的任何类。
+设计原则：
+  - 业务内容在 skill 文件和 YAML 配置里，Python 代码只负责加载、对话、校验、传递
+  - guide_node 是唯一调用 interrupt() 的地方
+  - DemoGuideAgent 正常调用 LLM，输出由 skill 约束，Pydantic 校验
+  - 不走 AgentTemplate（无 plan.yaml，无多步 executor）
 """
 
 from __future__ import annotations
@@ -38,78 +36,176 @@ _AGENT_DIR = Path(__file__).parent
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Pydantic 输出校验模型
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_pydantic_models():
+    """延迟导入 Pydantic，构建输出校验模型。"""
+    try:
+        from pydantic import BaseModel, field_validator
+
+        class RefinedScreeningCriteria(BaseModel):
+            """规范化纳排标准，必须包含三个非空列表。"""
+            version:         str
+            inclusion:       list[str]
+            exclusion:       list[str]
+            borderline_rules: list[str]
+
+        class SchemaTemplate(BaseModel):
+            """数据库字段模板元数据，template_id 强制为 hap_peptide_v1。"""
+            template_id:           str
+            schema_template_path:  str
+            schema_file:           str
+            filling_rules_file:    str
+
+            @field_validator("template_id")
+            @classmethod
+            def must_be_hap_peptide_v1(cls, v: str) -> str:
+                """强制校验 template_id，防止 LLM 生成错误值。"""
+                if v != "hap_peptide_v1":
+                    raise ValueError(f"template_id 必须是 hap_peptide_v1，实际：{v!r}")
+                return v
+
+        class GuideOutput(BaseModel):
+            """Guide Agent 完整输出结构，用于校验 LLM 返回 JSON。"""
+            ok:                       bool = True
+            stage:                    str  = "guide_completed"
+            user_confirmed:           bool = True
+            raw_user_prompt:          str  = ""
+            raw_user_screening_rules: dict = {}
+            refined_task_prompt:      str
+            refined_screening_criteria: RefinedScreeningCriteria
+            schema_template:          SchemaTemplate
+            guide_questions:          list[dict] = []
+            guide_summary:            str = ""
+
+        return GuideOutput, RefinedScreeningCriteria, SchemaTemplate
+    except ImportError:
+        return None, None, None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 内部辅助函数
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _load_identity_and_skills() -> str:
-    """加载 identity.yaml 和 skills/*.md，拼成 system prompt 文本。
+    """加载 identity.yaml 和 skills/*.md，拼成 LLM system prompt。
 
-    逻辑复用 context_builder._load_skills() 思路：
-      - 先加载 identity.yaml，拼成角色/职责/约束描述
-      - 再按文件名字母序加载 skills/*.md，每个文件加 '### <文件名>' 标题
-      - 拼接为完整 system prompt
+    skills/ 目录下按字母序加载所有 .md 文件，
+    demo_hap_peptide_v1_guide.md 因文件名排序靠前，LLM 优先读取。
 
     Returns:
         str，完整的 system prompt 文本。
     """
     parts: list[str] = []
 
-    # ── 1. 加载 identity.yaml（角色定义）────────────────────────────────────
+    # ── 1. identity.yaml ──────────────────────────────────────────────────────
     identity_path = _AGENT_DIR / "identity.yaml"
     if identity_path.exists():
         try:
             identity = yaml.safe_load(identity_path.read_text(encoding="utf-8"))
-            # 拼接 role + objective + responsibilities + constraints
             role_text = identity.get("role", "")
             objective  = identity.get("objective", "")
             resp_list  = identity.get("responsibilities", [])
             cons_list  = identity.get("constraints", [])
-
             parts.append(f"# 角色\n{role_text}")
             if objective:
                 parts.append(f"## 目标\n{objective.strip()}")
             if resp_list:
-                resp_str = "\n".join(f"- {r}" for r in resp_list)
-                parts.append(f"## 职责\n{resp_str}")
+                parts.append("## 职责\n" + "\n".join(f"- {r}" for r in resp_list))
             if cons_list:
-                cons_str = "\n".join(f"- {c}" for c in cons_list)
-                parts.append(f"## 约束\n{cons_str}")
+                parts.append("## 约束\n" + "\n".join(f"- {c}" for c in cons_list))
         except Exception as e:
-            # identity 加载失败不崩溃，继续加载 skills
             print(f"[GuideAgent] ⚠️ identity.yaml 加载失败：{e}")
 
-    # ── 2. 加载 skills/*.md（按文件名字母序）────────────────────────────────
+    # ── 2. skills/*.md（按文件名字母序，demo_hap_peptide_v1_guide.md 靠前）────
     skills_dir = _AGENT_DIR / "skills"
     if skills_dir.exists():
-        skill_files = sorted(skills_dir.glob("*.md"))
-        for skill_file in skill_files:
+        for skill_file in sorted(skills_dir.glob("*.md")):
             content = skill_file.read_text(encoding="utf-8").strip()
             if content:
-                # 文件名转为可读标题（如 demo_script → Demo Script）
                 skill_name = skill_file.stem.replace("_", " ").title()
-                parts.append(f"## Skills: {skill_name}\n\n{content}")
+                parts.append(f"## Skill: {skill_name}\n\n{content}")
 
     return "\n\n".join(parts)
 
 
-def _call_llm(system_prompt: str, user_prompt: str, model: str) -> str:
-    """调用 LLM 做一次推理，返回模型输出文本。
+def _load_demo_questions() -> dict:
+    """从 demo_hap_peptide_v1_questions.yaml 加载 4 个确认问题的配置。
 
-    这是 guide_agent 三步对话中的每一次 LLM 调用（任务描述/字段模板/准入标准各一次）。
-    temperature=0 保证输出的确定性（demo 模式下格式固定）。
+    Returns:
+        dict，含 questions 列表、schema_template、default_user_prompt、default_query。
+    """
+    config_path = _AGENT_DIR / "demo_hap_peptide_v1_questions.yaml"
+    if not config_path.exists():
+        raise FileNotFoundError(f"demo 问题配置文件未找到：{config_path}")
+    return yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+
+def _build_interrupt_payload(q: dict) -> dict:
+    """从 YAML 问题配置构造 interrupt payload dict。
+
+    payload 统一格式：
+      type、label、topic、options、default 字段必须存在，
+      content 字段根据问题类型动态构造。
 
     Args:
-        system_prompt: 系统提示词（identity + skills 拼接结果）。
-        user_prompt:   用户消息（当前步骤的具体指令）。
-        model:         LiteLLM 兼容的模型字符串（如 "openai/gpt-4o"）。
+        q: YAML 配置中单个问题的 dict。
+
+    Returns:
+        符合 conversation.py 渲染约定的 interrupt payload。
+    """
+    qtype = q["type"]
+
+    if qtype == "q1_goal_confirm":
+        content = q.get("content", "")
+
+    elif qtype == "q2_boundary_confirm":
+        content = {
+            "inclusion": q.get("inclusion", []),
+            "exclusion": q.get("exclusion", []),
+        }
+
+    elif qtype == "q3_schema_confirm":
+        content = {
+            "template_id":         q.get("template_id", "hap_peptide_v1"),
+            "schema_path":         q.get("schema_path", ""),
+            "filling_rules_path":  q.get("filling_rules_path", ""),
+            "description":         q.get("description", ""),
+        }
+
+    elif qtype == "q4_pipeline_start":
+        content = q.get("content", "guide → search → screen → extract → database write")
+
+    else:
+        content = q.get("content", "")
+
+    return {
+        "type":    qtype,
+        "id":      q.get("id", ""),
+        "label":   q.get("label", ""),
+        "topic":   q.get("topic", ""),
+        "content": content,
+        "options": q.get("options", ["确认"]),
+        "default": q.get("default", 0),
+    }
+
+
+def _call_llm(system_prompt: str, user_prompt: str, model: str) -> str:
+    """调用 LLM 做一次推理，返回原始输出文本。
+
+    Args:
+        system_prompt: LLM system 消息（identity + skills 拼接）。
+        user_prompt:   LLM user 消息（当前任务指令）。
+        model:         LiteLLM 兼容模型字符串（如 "openai/gpt-4o"）。
 
     Returns:
         str，LLM 输出的原始文本。
 
     Raises:
-        Exception: LLM 调用失败时抛出，由 RealGuideAgent.run() 捕获并降级。
+        Exception: LLM 调用失败时抛出，由调用方捕获并降级。
     """
-    import litellm  # 延迟导入，失败时不影响 MockGuideAgent
+    import litellm
 
     response = litellm.completion(
         model=model,
@@ -117,270 +213,247 @@ def _call_llm(system_prompt: str, user_prompt: str, model: str) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_prompt},
         ],
-        temperature=0.0,
-        max_tokens=1024,
+        temperature=0.1,   # 轻微随机性，避免完全重复但保持一致性
+        max_tokens=4096,   # 输出较长，需要足够的 token 预算
     )
     return response.choices[0].message.content.strip()
 
 
-def _parse_json_from_llm(text: str, key: str) -> Any:
+def _parse_json_from_llm(text: str) -> dict:
     """从 LLM 输出里提取 JSON，三层 fallback 保健壮性。
 
-    与 executor._extract_output() 思路一致：
     Layer 1：提取 ```json ... ``` 代码块后解析
     Layer 2：直接 json.loads（LLM 直接输出纯 JSON 时）
     Layer 3：在文本中找第一个 { 到最后一个 } 的子串解析
 
     Args:
         text: LLM 输出的原始文本。
-        key:  期望的顶层 JSON key（如 "task_description"），用于提取嵌套值。
 
     Returns:
-        解析出的 JSON 值（str/dict/list），失败返回原始 text。
+        dict，解析出的 JSON 对象；全部失败时返回 {}。
     """
-    # Layer 1：提取 ```json 代码块
+    # Layer 1：```json ... ``` 代码块
     m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if m:
         try:
-            parsed = json.loads(m.group(1).strip())
-            return parsed.get(key, parsed) if isinstance(parsed, dict) else parsed
+            return json.loads(m.group(1).strip())
         except Exception:
             pass
 
-    # Layer 2：直接解析（LLM 输出纯 JSON 时）
+    # Layer 2：直接解析
     stripped = text.strip()
     if stripped.startswith("{"):
         try:
-            parsed = json.loads(stripped)
-            return parsed.get(key, parsed) if isinstance(parsed, dict) else parsed
+            return json.loads(stripped)
         except Exception:
             pass
 
-    # Layer 3：找 { ... } 子串解析
+    # Layer 3：找最外层 { ... }
     start = text.find("{")
     end   = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
+    if start != -1 and end > start:
         try:
-            parsed = json.loads(text[start:end + 1])
-            return parsed.get(key, parsed) if isinstance(parsed, dict) else parsed
+            return json.loads(text[start:end + 1])
         except Exception:
             pass
 
-    # 全部失败：返回原始文本（downstream 会用 fallback 处理）
-    return text
+    return {}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Mock Guide Agent（离线开发/单元测试用，不调 LLM）
-# ─────────────────────────────────────────────────────────────────────────────
+def _default_output(raw_prompt: str, config: dict) -> dict:
+    """LLM 失败时的降级输出，内容来自 YAML 配置的固定文本。
 
-class MockGuideAgent:
-    """Mock 版引导员：不调 LLM，直接返回固定的三步 payload 数据。
+    Args:
+        raw_prompt: 用户原始输入。
+        config:     demo_hap_peptide_v1_questions.yaml 的加载结果。
 
-    用途：
-    - 本地开发时快速验证 guide_node 的 interrupt 流程
-    - CI/CD 单元测试（不需要 LLM API Key）
-    - pipeline 的 mock 模式
-
-    注意：interrupt() 不在此类内调用，由 build_guide_node() 生成的 guide_node 负责。
-         此类只负责准备 payload 数据。
+    Returns:
+        dict，符合 GuideOutput 结构的降级输出。
     """
-
-    def run(self, input_data: dict) -> dict:
-        """返回固定的三步 interrupt payload 数据（不调 LLM）。
-
-        Args:
-            input_data: 包含 user_query 等初始输入的 dict。
-
-        Returns:
-            dict，含三个 payload（task_confirm / schema_confirm / criteria_confirm）
-            和最终的三件核心物（task_description / db_schema / inclusion_criteria）。
-        """
-        user_query = input_data.get("user_query", "HAp 肽段矿化研究")
-
-        # ── 固定的任务描述（根据 user_query 简单拼接）──────────────────────
-        task_description = (
-            f"针对 {user_query}，系统将从 PubMed 检索相关文献，"
-            "重点关注与羟基磷灰石（HAp）或磷酸钙矿化体系相互作用的合成肽或天然肽段研究。"
-            "将抽取肽段序列、功能标签、实验证据层级等结构化信息，"
-            "构建 HAp 肽段功能数据库，支持后续的肽段设计和材料优化研究。"
-        )
-
-        # ── 固定的字段模板（HAp 肽段核心字段集）──────────────────────────
-        db_schema = {
-            "paper_id":               {"type": "str",  "description": "内部论文编号",      "example": "P000001"},
-            "doi":                    {"type": "str",  "description": "论文 DOI",          "example": "10.1021/acs.biomac.2c00123"},
-            "title":                  {"type": "str",  "description": "论文标题",           "example": "Peptide-HAp binding..."},
-            "publication_year":       {"type": "int",  "description": "发表年份",           "example": "2023"},
-            "entity_name_normalized": {"type": "str",  "description": "标准化肽段名称/序列", "example": "WGNYAYK"},
-            "sequence_raw":           {"type": "str",  "description": "原始氨基酸序列",     "example": "RKLPDA"},
-            "interaction_target":     {"type": "str",  "description": "作用靶底物",         "example": "HAp"},
-            "summary_functions":      {"type": "str",  "description": "功能标签（分号分隔）","example": "adsorption;remineralization"},
-            "evidence_overall_level": {"type": "str",  "description": "证据层级",           "example": "in_vitro"},
-            "text_to_sequence":       {"type": "str",  "description": "序列来源定位",       "example": "Table 2"},
-        }
-
-        # ── 固定的准入/排除标准（HAp 肽段领域默认模板）────────────────────
-        inclusion_criteria = {
+    schema_tmpl = config.get("schema_template", {})
+    return {
+        "ok": True,
+        "stage": "guide_completed",
+        "user_confirmed": True,
+        "raw_user_prompt": raw_prompt,
+        "raw_user_screening_rules": {"inclusion": [], "exclusion": []},
+        "refined_task_prompt": (
+            "本任务旨在系统检索并结构化整理羟基磷灰石 HAp、apatite、calcium phosphate、"
+            "ACP、牙釉质、牙本质及相关钙磷矿化体系中具有明确氨基酸序列或可回溯序列来源的"
+            "肽段、短肽、寡肽、蛋白片段、功能域或肽库候选序列研究。重点关注这些肽段在矿物"
+            "表面吸附、离子捕获、成核、矿物沉积、晶体生长、晶体取向或形貌调控、钙磷相稳定"
+            "或相转化、抗脱矿、牙釉质再矿化、牙本质再矿化等过程中的作用及证据。后续 pipeline"
+            "应基于该任务完成 PubMed 文献检索、文献筛选、全文获取、RAG 辅助信息抽取和结构化"
+            "数据库写入，抽取内容围绕 hap_peptide_v1 字段模板展开。"
+        ),
+        "refined_screening_criteria": {
+            "version": "guide_hap_peptide_v1_demo",
             "inclusion": [
-                "研究对象为合成肽或天然蛋白来源肽段",
-                "实验涉及 HAp、磷酸钙（TCP/OCP/ACP）或牙体相关底物",
-                "包含定性或定量的实验结果（结合亲和力、矿化促进/抑制等）",
-                "英文原文，发表年份不早于 2000 年",
-                "提供具体的肽段序列信息（单字母缩写或 IUPAC 命名）",
+                "必须为原创研究文献（体外、离体、动物、临床，或与实验配套的计算研究）",
+                "研究对象必须包含明确肽段、短肽、寡肽、肽库、蛋白片段或可拆分功能域",
+                "原文必须给出完整氨基酸序列或可回溯序列来源",
+                "研究体系必须涉及 HAp、apatite、calcium phosphate、ACP、牙釉质、牙本质、骨矿物或体外矿化模型",
+                "必须报告至少一种矿化相关实验功能（吸附、成核、沉积、生长、形貌调控、抗脱矿、再矿化）",
+                "可接受的实验证据：SEM、TEM、AFM、XRD、FTIR、Raman、SPR、ITC、QCM-D、ICP-OES、pH cycling 等",
+                "摘要无法判断是否有序列，但题名提示 designed peptide / peptide library / derived peptide 时暂时保留",
             ],
             "exclusion": [
-                "综述、评论、会议摘要、编辑信函（无原始实验数据）",
-                "纯计算或纯分子动力学模拟研究（无实验验证）",
-                "研究对象明确排除肽段（仅研究无机矿物颗粒）",
-                "无法获取全文或摘要信息不完整",
+                "综述、系统综述、Meta 分析、社论、评论、会议摘要、无原始数据的观点文章",
+                "没有明确肽段对象，或完整蛋白研究无法拆分出具体功能片段或序列边界",
+                "完全没有序列信息且无可回溯序列来源",
+                "仅研究抗菌、细胞毒性、细胞增殖、免疫调节、抗炎等非矿化读出",
+                "只涉及无机材料、聚合物、纳米材料而没有肽段作为核心干预对象",
+                "纯 docking、纯 MD 模拟、纯机器学习预测且没有实验矿化证据",
+                "信息不足且无法通过全文或补充材料判断核心纳入条件",
             ],
-        }
-
-        # 返回三步 payload + 最终产出
-        return {
-            # 三步 interrupt payload（由 guide_node 逐一传给 interrupt()）
-            "task_confirm_payload": {
-                "type":    "task_confirm",
-                "label":   "任务描述",
-                "content": task_description,
-                "options": ["确认，继续"],
-                "default": 0,
-            },
-            "schema_confirm_payload": {
-                "type":    "schema_confirm",
-                "label":   "数据库字段模板",
-                "content": db_schema,
-                "options": ["确认，使用此模板"],
-                "default": 0,
-            },
-            "criteria_confirm_payload": {
-                "type":    "criteria_confirm",
-                "label":   "文献准入/排除标准",
-                "content": inclusion_criteria,
-                "options": ["确认，进入检索"],
-                "default": 0,
-            },
-            # 最终三件核心物（guide_node 从 payload 里提取后写回 PipelineState）
-            "task_description":   task_description,
-            "db_schema":          db_schema,
-            "inclusion_criteria": inclusion_criteria,
-        }
+            "borderline_rules": [
+                "摘要无法判断是否有序列，但题名提示 designed/library/derived peptide 时保留进复筛",
+                "full-length protein 研究只有在能拆分明确功能片段或序列边界时才可保留",
+                "计算模拟研究只有在服务于同一研究的实验矿化证据时才作为辅助证据保留",
+                "牙釉质、牙本质、骨矿物、体外钙磷晶体均可纳入，后续抽取需标注具体材料类型",
+            ],
+        },
+        "schema_template": {
+            "template_id":          schema_tmpl.get("template_id", "hap_peptide_v1"),
+            "schema_template_path": schema_tmpl.get("schema_template_path", "docs/schema_templates/hap_peptide_v1/"),
+            "schema_file":          schema_tmpl.get("schema_file", "docs/schema_templates/hap_peptide_v1/schema.yaml"),
+            "filling_rules_file":   schema_tmpl.get("filling_rules_file", "docs/schema_templates/hap_peptide_v1/filling_rules.md"),
+        },
+        "guide_questions": [
+            {"id": "Q1", "topic": "research_goal_confirmation",             "confirmed": True},
+            {"id": "Q2", "topic": "research_object_boundary_confirmation",  "confirmed": True},
+            {"id": "Q3", "topic": "schema_template_confirmation",           "confirmed": True},
+            {"id": "Q4", "topic": "pipeline_start_confirmation",            "confirmed": True},
+        ],
+        "guide_summary": "Guide Agent 已将用户需求规范化为 HAp peptide v1 demo 任务输入。",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Real Guide Agent（真实 LLM 调用，三步对话产出三件核心物）
+# Demo Guide Agent（正常调用 LLM，由 skill 约束输出）
 # ─────────────────────────────────────────────────────────────────────────────
 
-class RealGuideAgent:
-    """Real 版引导员：三次 LLM 调用产出三件核心物。
+class DemoGuideAgent:
+    """Demo 版引导员：从 skill 文件和 YAML 配置加载内容，调用 LLM 生成规范化 JSON 输出。
 
-    每步调用 _call_llm()，再用 _parse_json_from_llm() 解析输出。
-    任何步骤失败时，降级到 MockGuideAgent 的固定输出，并在返回值中标注 fallback=True。
-
-    注意：interrupt() 不在此类内调用，由 build_guide_node() 生成的 guide_node 负责。
+    职责分工：
+      - 4 个 interrupt payload 来自 YAML 配置（内容固定，不调 LLM）
+      - 最终 JSON 输出（refined_task_prompt / refined_screening_criteria）由 LLM 生成
+      - Pydantic 校验 + 强制 template_id == hap_peptide_v1
+      - 任何 LLM 失败时降级到 YAML 配置的预设值（不崩溃）
     """
 
     def __init__(self, model: str | None = None):
-        """
-        Args:
-            model: LiteLLM 兼容的模型字符串。
-                   默认从环境变量 DEFAULT_LLM_MODEL 读取。
-        """
-        self.model = model or os.getenv(
-            "DEFAULT_LLM_MODEL", "minimax/MiniMax-M2.7-highspeed"
-        )
-        # 加载 system prompt（identity + skills），只加载一次
+        self.model  = model or os.getenv("DEFAULT_LLM_MODEL", "openai/gpt-4o")
+        self._config        = _load_demo_questions()
         self._system_prompt = _load_identity_and_skills()
 
-    def run(self, input_data: dict) -> dict:
-        """三次 LLM 调用，分别产出任务描述/字段模板/准入标准。
+    def _payloads(self) -> list[dict]:
+        """从 YAML 配置构造 4 个 interrupt payload。"""
+        return [
+            _build_interrupt_payload(q)
+            for q in self._config.get("questions", [])
+        ]
+
+    def _generate_output(self, raw_prompt: str) -> dict:
+        """调用 LLM 生成最终规范化 JSON 输出。
+
+        LLM 以完整 skill 文档为 system prompt，以用户输入为 user prompt，
+        生成符合 GuideOutput 结构的 JSON。
 
         Args:
-            input_data: 包含 user_query 等初始输入的 dict。
+            raw_prompt: 用户原始任务描述（或 YAML 中的默认值）。
 
         Returns:
-            dict，含三步 payload 和最终三件核心物。
-            若 LLM 调用失败，降级到 MockGuideAgent 并附加 fallback=True。
+            dict，GuideOutput 结构；LLM 失败时返回降级输出。
         """
-        user_query = input_data.get("user_query", "")
+        user_prompt = f"""用户初始任务描述：
+{raw_prompt}
+
+请按照 skill 文档（Demo Guide Skill: HAp Peptide v1）的要求，
+生成最终规范化 JSON 输出。
+
+注意：
+1. schema_template.template_id 必须是 hap_peptide_v1
+2. refined_task_prompt 必须包含 skill §5 中要求的所有信息点
+3. refined_screening_criteria 必须包含 inclusion（≥6 条）、exclusion（≥7 条）、borderline_rules（≥4 条）
+4. 只输出纯 JSON，不输出 Markdown 标记或额外解释
+5. 不要生成 PubMed 检索式
+"""
 
         try:
-            # ── Step 1：生成任务描述 ─────────────────────────────────────────
-            # 告诉 LLM 当前是第一步，需要输出任务描述 JSON
-            user_prompt_1 = (
-                f"用户的研究诉求：{user_query}\n\n"
-                "请严格按照 demo_script.md 步骤一的格式，生成任务描述。"
-            )
-            raw_1 = _call_llm(self._system_prompt, user_prompt_1, self.model)
-            task_description = _parse_json_from_llm(raw_1, "task_description")
-            if not isinstance(task_description, str):
-                # 解析结果不是字符串，转为字符串
-                task_description = str(task_description)
+            raw_text = _call_llm(self._system_prompt, user_prompt, self.model)
+            parsed   = _parse_json_from_llm(raw_text)
 
-            # ── Step 2：生成字段模板 ─────────────────────────────────────────
-            # 告诉 LLM 当前是第二步，需要基于任务描述输出字段模板 JSON
-            user_prompt_2 = (
-                f"任务描述已确认：{task_description}\n\n"
-                "请严格按照 demo_script.md 步骤二的格式，基于上述任务描述，"
-                "从 schema_template.md 中选取最相关的字段，生成字段模板 JSON。"
-            )
-            raw_2 = _call_llm(self._system_prompt, user_prompt_2, self.model)
-            db_schema = _parse_json_from_llm(raw_2, "db_schema")
-            if not isinstance(db_schema, dict):
-                # 解析结果不是 dict，使用空 dict（降级到 mock 的字段模板）
-                raise ValueError(f"db_schema 解析失败，原始输出：{raw_2[:100]}")
-
-            # ── Step 3：生成准入/排除标准 ────────────────────────────────────
-            # 告诉 LLM 当前是第三步，需要基于任务描述输出准入/排除标准 JSON
-            user_prompt_3 = (
-                f"任务描述：{task_description}\n"
-                f"字段模板已确认（{len(db_schema)} 个字段）。\n\n"
-                "请严格按照 demo_script.md 步骤三的格式，"
-                "参考 criteria_template.md，生成文献准入/排除标准 JSON。"
-            )
-            raw_3 = _call_llm(self._system_prompt, user_prompt_3, self.model)
-            inclusion_criteria = _parse_json_from_llm(raw_3, "inclusion_criteria")
-            if not isinstance(inclusion_criteria, dict):
-                raise ValueError(f"inclusion_criteria 解析失败，原始输出：{raw_3[:100]}")
+            # Pydantic 校验
+            GuideOutput, _, _ = _build_pydantic_models()
+            if GuideOutput is not None:
+                # 补充必要字段（LLM 可能省略）
+                parsed.setdefault("raw_user_prompt", raw_prompt)
+                parsed.setdefault("raw_user_screening_rules", {})
+                validated = GuideOutput(**parsed)
+                return validated.model_dump()
+            return parsed  # Pydantic 不可用时直接返回
 
         except Exception as e:
-            # LLM 调用或解析失败：降级到 MockGuideAgent 的固定输出
-            print(f"[RealGuideAgent] ⚠️ LLM 调用失败，降级到 mock 输出：{e}")
-            mock_result = MockGuideAgent().run(input_data)
-            mock_result["fallback"] = True  # 标注本次使用了 fallback
-            mock_result["fallback_reason"] = str(e)
-            return mock_result
+            print(f"[DemoGuideAgent] ⚠️ LLM 输出处理失败，降级到预设值：{e}")
+            return _default_output(raw_prompt, self._config)
 
-        # ── 构造三步 interrupt payload（格式与 §2 一致）──────────────────────
+    def run(self, input_data: dict) -> dict:
+        """准备 4 个 interrupt payload 并生成最终 LLM 输出。
+
+        Args:
+            input_data: 包含 user_query 等字段的输入 dict。
+
+        Returns:
+            dict，含 4 个 payload（q1..q4）+ 最终规范化输出字段。
+        """
+        raw_prompt = (
+            input_data.get("user_query", "")
+            or self._config.get("default_user_prompt", "")
+        ).strip()
+
+        # 4 个 interrupt payload（内容来自 YAML，不调 LLM）
+        payloads = self._payloads()
+
+        # 最终 JSON 输出（调用 LLM）
+        output = self._generate_output(raw_prompt)
+
         return {
-            "task_confirm_payload": {
-                "type":    "task_confirm",
-                "label":   "任务描述",
-                "content": task_description,
-                "options": ["确认，继续"],
-                "default": 0,
-            },
-            "schema_confirm_payload": {
-                "type":    "schema_confirm",
-                "label":   "数据库字段模板",
-                "content": db_schema,
-                "options": ["确认，使用此模板"],
-                "default": 0,
-            },
-            "criteria_confirm_payload": {
-                "type":    "criteria_confirm",
-                "label":   "文献准入/排除标准",
-                "content": inclusion_criteria,
-                "options": ["确认，进入检索"],
-                "default": 0,
-            },
-            # 最终三件核心物
-            "task_description":   task_description,
-            "db_schema":          db_schema,
-            "inclusion_criteria": inclusion_criteria,
-            "fallback": False,
+            "q1_payload":  payloads[0] if len(payloads) > 0 else {},
+            "q2_payload":  payloads[1] if len(payloads) > 1 else {},
+            "q3_payload":  payloads[2] if len(payloads) > 2 else {},
+            "q4_payload":  payloads[3] if len(payloads) > 3 else {},
+            # 最终产出
+            "refined_task_prompt":      output.get("refined_task_prompt", ""),
+            "refined_screening_criteria": output.get("refined_screening_criteria", {}),
+            "schema_template":          output.get("schema_template", self._config.get("schema_template", {})),
+            "guide_summary":            output.get("guide_summary", ""),
+            "guide_questions":          output.get("guide_questions", []),
+            "raw_user_prompt":          raw_prompt,
+            "raw_user_screening_rules": output.get("raw_user_screening_rules", {}),
+            "query":                    self._config.get("default_query", ""),
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real Guide Agent（面向未来：任意任务 + 自由纳排规则）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RealGuideAgent:
+    """Real 版引导员：支持任意研究任务，输出由 LLM 自由生成（不固定 demo 范围）。
+
+    当前 v0.1 demo 阶段暂不使用，保留接口供未来扩展。
+    任何失败会降级到 DemoGuideAgent 的输出。
+    """
+
+    def __init__(self, model: str | None = None):
+        self.model = model or os.getenv("DEFAULT_LLM_MODEL", "openai/gpt-4o")
+
+    def run(self, input_data: dict) -> dict:
+        """降级到 DemoGuideAgent（v0.1 阶段）。"""
+        print("[RealGuideAgent] ⚠️ v0.1 阶段降级到 DemoGuideAgent")
+        return DemoGuideAgent(model=self.model).run(input_data)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -388,111 +461,78 @@ class RealGuideAgent:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_guide_node(
-    mode: str = "mock",
+    mode:  str       = "demo",
     model: str | None = None,
 ):
     """构造 guide_node 函数，供 graph/nodes.py 注册为 LangGraph 节点。
 
-    guide_node 是唯一调用 interrupt() 的地方（LangGraph 要求 interrupt 在 graph
-    节点的调用栈内才有效），三次 interrupt 分别对应三件核心物的用户确认。
+    guide_node 调用 interrupt() 4 次（Q1→Q2→Q3→Q4），每次对应一步用户确认。
+    interrupt() 必须在 LangGraph graph node 的调用栈内才有效。
 
     Args:
-        mode:  运行模式，"mock" 或 "real"。
+        mode:  运行模式（"demo" / "real"），决定使用哪个 Agent 实现。
         model: LiteLLM 模型字符串，None 时从 DEFAULT_LLM_MODEL 环境变量读取。
 
     Returns:
         guide_node(state: PipelineState) -> dict — 符合 LangGraph node 签名的函数。
     """
-    # 根据 mode 实例化对应的 Agent
-    if mode == "real":
-        agent: MockGuideAgent | RealGuideAgent = RealGuideAgent(model=model)
-    else:
-        agent = MockGuideAgent()
+    agent: DemoGuideAgent | RealGuideAgent = (
+        RealGuideAgent(model=model) if mode == "real"
+        else DemoGuideAgent(model=model)
+    )
 
     def guide_node(state: Any) -> dict:
-        """Guide 节点：三步 interrupt 引导用户确认三件核心物。
+        """Guide 节点：4 步 interrupt 引导用户确认任务范围。
 
         LangGraph interrupt() 机制：
-          1. 调用 interrupt(payload) → 图暂停，payload 传给 CLI
-          2. CLI 渲染 payload 给用户，等待确认（按 Enter）
-          3. CLI 调用 graph.stream(Command(resume=0), config) → 图从断点继续
-          4. interrupt() 的返回值 = resume 值（0 = 选项0，即"确认"）
+          1. interrupt(payload) → 图暂停，payload 传给 CLI 渲染
+          2. 用户按 Enter → CLI 调用 Command(resume=0) 继续
+          3. interrupt() 返回值 = resume 值
 
-        返回值写入 PipelineState 的字段：
-          task_description, db_schema, inclusion_criteria, user_confirmed,
-          guide_summary, query, ok, run_metadata, message
+        最终写入 PipelineState：
+          query / refined_task_prompt / refined_screening_criteria /
+          schema_template / guide_summary / guide_questions /
+          user_confirmed / raw_user_prompt / raw_user_screening_rules
         """
-        # 从 state 获取用户输入
         user_query = state.get("user_query", "") if hasattr(state, "get") else ""
-
-        # 调用 agent.run() 准备三步 payload（不调 interrupt，只准备数据）
         result = agent.run({"user_query": user_query})
 
-        # ── 第一个 interrupt：确认任务描述 ──────────────────────────────────
-        # 此处暂停，等待用户确认「任务描述」（CLI 渲染 task_confirm_payload）
         try:
             from langgraph.types import interrupt as lg_interrupt
-            # interrupt 返回用户的选择（Demo 版固定为 0）
-            _resume_1 = lg_interrupt(result["task_confirm_payload"])
+
+            # ── Q1：研究目标确认 ────────────────────────────────────────────
+            # 此处暂停，CLI 渲染研究目标文本，等待用户按 Enter 确认
+            lg_interrupt(result["q1_payload"])
+
+            # ── Q2：研究对象边界确认 ────────────────────────────────────────
+            # 此处暂停，CLI 渲染纳入/排除对象列表，等待用户确认
+            lg_interrupt(result["q2_payload"])
+
+            # ── Q3：数据库字段模板确认 ──────────────────────────────────────
+            # 此处暂停，CLI 渲染 hap_peptide_v1 模板元数据，等待用户确认
+            lg_interrupt(result["q3_payload"])
+
+            # ── Q4：是否进入 pipeline ───────────────────────────────────────
+            # 此处暂停，CLI 展示流水线流程，等待用户确认后启动
+            lg_interrupt(result["q4_payload"])
+
         except ImportError:
-            # langgraph 不可用时跳过 interrupt（批量测试模式）
-            print("[guide_node] ⚠️ langgraph.types.interrupt 不可用，跳过第一个 interrupt")
-            _resume_1 = 0
+            # langgraph 不可用（批量测试模式），跳过 interrupt
+            print("[guide_node] ⚠️ langgraph.types.interrupt 不可用，跳过确认步骤")
 
-        # ── 第二个 interrupt：确认数据库字段模板 ────────────────────────────
-        # 此处暂停，等待用户确认「字段模板」（CLI 渲染 schema_confirm_payload）
-        try:
-            from langgraph.types import interrupt as lg_interrupt
-            _resume_2 = lg_interrupt(result["schema_confirm_payload"])
-        except ImportError:
-            print("[guide_node] ⚠️ langgraph.types.interrupt 不可用，跳过第二个 interrupt")
-            _resume_2 = 0
-
-        # ── 第三个 interrupt：确认文献准入/排除标准 ─────────────────────────
-        # 此处暂停，等待用户确认「准入/排除标准」（CLI 渲染 criteria_confirm_payload）
-        try:
-            from langgraph.types import interrupt as lg_interrupt
-            _resume_3 = lg_interrupt(result["criteria_confirm_payload"])
-        except ImportError:
-            print("[guide_node] ⚠️ langgraph.types.interrupt 不可用，跳过第三个 interrupt")
-            _resume_3 = 0
-
-        # ── 三步全部确认完成，写回 PipelineState patch ───────────────────────
-        task_description   = result.get("task_description", "")
-        db_schema          = result.get("db_schema", {})
-        inclusion_criteria = result.get("inclusion_criteria", {})
-        is_fallback        = result.get("fallback", False)
-
-        # 从 task_description 派生检索意图（取前80字作为 search_agent 的 query）
-        query = task_description[:80] if task_description else user_query
-
+        # ── 返回 PipelineState patch ────────────────────────────────────────
         return {
-            # ── 三件核心物（写入 PipelineState）
-            "task_description":   task_description,
-            "db_schema":          db_schema,
-            "inclusion_criteria": inclusion_criteria,
-            "user_confirmed":     True,   # 三步均已确认
-            # ── Search Agent 使用的检索 query
-            "query":              query,
-            # ── 元数据（调试用）
-            "guide_summary": (
-                f"引导阶段完成（{'mock' if is_fallback or mode == 'mock' else 'real'} 模式），"
-                f"任务描述已确认，字段模板含 {len(db_schema)} 个字段，"
-                f"准入标准含 {len(inclusion_criteria.get('inclusion', []))} 条准入 / "
-                f"{len(inclusion_criteria.get('exclusion', []))} 条排除。"
-            ),
-            "ok": True,
-            "message": "guide_agent 完成，进入流水线",
-            "run_metadata": {
-                "agent_name": "guide_agent",
-                "status":     "success",
-                "mode":       mode,
-                "fallback":   is_fallback,
-            },
+            "query":                      result.get("query", ""),
+            "refined_task_prompt":        result.get("refined_task_prompt", ""),
+            "refined_screening_criteria": result.get("refined_screening_criteria", {}),
+            "schema_template":            result.get("schema_template", {}),
+            "guide_summary":              result.get("guide_summary", ""),
+            "guide_questions":            result.get("guide_questions", []),
+            "user_confirmed":             True,
+            "raw_user_prompt":            result.get("raw_user_prompt", ""),
+            "raw_user_screening_rules":   result.get("raw_user_screening_rules", {}),
+            "ok":                         True,
+            "message":                    "Guide Agent 完成四步确认，任务配置规范化完毕",
         }
 
     return guide_node
-
-
-# ── 公开接口 ──────────────────────────────────────────────────────────────────
-__all__ = ["MockGuideAgent", "RealGuideAgent", "build_guide_node"]
