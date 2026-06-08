@@ -143,8 +143,8 @@ def _build_patch(
 
     字段映射规则（基于 graph/state.py 的 PipelineState 定义）：
       search_agent  → candidate_paper_ids + search_summary
-      screen_agent  → candidate_paper_ids（过滤后）+ screen_summary
-      extract_agent → extract_summary
+      screen_agent  → screened_paper_ids + screen_summary
+      extract_agent → extracted_papers + extract_summary + failed_papers
       其他 agent    → 写入 agent_name_summary
 
     run_metadata 始终写入，供调试和 trace 关联使用。
@@ -157,9 +157,24 @@ def _build_patch(
     if "candidate_paper_ids" in final:
         patch["candidate_paper_ids"] = final["candidate_paper_ids"]
 
-    # agent 特定摘要字段
-    summary_key = f"{agent_name.lower().replace(' ', '_')}_summary"
+    if "screened_paper_ids" in final:
+        patch["screened_paper_ids"] = final["screened_paper_ids"]
+
+    # agent 特定摘要字段（映射到 PipelineState 标准字段名）
+    summary_key_map = {
+        "search_agent": "search_summary",
+        "screen_agent": "screen_summary",
+        "extract_agent": "extract_summary",
+    }
+    summary_key = summary_key_map.get(agent_name, f"{agent_name.lower().replace(' ', '_')}_summary")
     patch[summary_key] = summary_text
+
+    # extract_agent 特定字段映射
+    if agent_name == "extract_agent":
+        if "papers" in final:
+            patch["extracted_papers"] = final["papers"]
+        if "failed_papers" in final:
+            patch["failed_papers"] = final["failed_papers"]
 
     # 运行元数据（调试用）
     patch["run_metadata"] = {

@@ -49,8 +49,15 @@ class PipelineState(TypedDict, total=False):
     """screen_agent 的运行摘要，由 output_adapter 生成。"""
 
     # ── Extract Agent 产出 ────────────────────────────────────────────────
+    extracted_papers: list[dict]
+    """成功抽取的论文结构化记录列表，由 extract_agent 写入。
+    每条记录包含 paper 元数据和 fae_records。"""
+
+    failed_papers: list[dict]
+    """抽取失败的论文列表及错误原因，由 extract_agent 写入。"""
+
     extracted_record_ids: list[str]
-    """成功抽取并写入数据库的记录 ID 列表，由 extract_agent 写入。"""
+    """成功抽取并写入数据库的记录 ID 列表，由 graph 层写入（基于 extracted_papers）。"""
 
     extract_summary: str
     """extract_agent 的运行摘要，由 output_adapter 生成。"""

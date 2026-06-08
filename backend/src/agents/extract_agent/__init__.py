@@ -1,18 +1,24 @@
-"""text_agent 包：HAp 肽数据库 Text Agent 模块。
+"""extract_agent 包：生物医学文献信息提取 Agent 模块。
 
 对外暴露的主入口：
-    TextAgent : 论文 PDF → 结构化数据库记录的全流程编排器
+    create_extract_agent : 创建 extract_agent 实例（基于 AgentTemplate）
 
 子模块职责：
-    text_agent.py       : TextAgent 主类，10 阶段流程编排
-    pdf_extractor.py    : PyMuPDF PDF 文本提取
-    prompt_builder.py   : System/User Prompt 构建
-    llm_client.py       : MiniMax-M2.5 LLM API 调用（OpenAI 兼容接口）
-    response_parser.py  : LLM 原始输出解析（JSON 提取 + reasoning 分离）
-    id_generator.py     : paper_id / record_id / fae_id 生成与 DOI 查重
-    field_dict_prompt.json : 嵌入 System Prompt 的 v0.1 字段字典（供 prompt_builder 加载）
+    agent.py            : AgentTemplate 入口函数
+    plan.yaml           : 执行计划定义
+    identity.yaml       : 身份配置
+    skills/             : 技能指南
+
+遗留模块（v0.1 旧版）：
+    text_agent.py       : 旧版 TextAgent（10 阶段流程），保留用于兼容
+    pdf_extractor.py    : PDF 文本提取
+    prompt_builder.py   : Prompt 构建
+    llm_client.py       : LLM 调用
+    response_parser.py  : 响应解析
+    id_generator.py     : ID 生成
+    field_dict_prompt.json : 字段字典
 """
 
-from text_agent.text_agent import TextAgent
+from backend.src.agents.extract_agent.agent import create_extract_agent
 
-__all__ = ['TextAgent']
+__all__ = ['create_extract_agent']

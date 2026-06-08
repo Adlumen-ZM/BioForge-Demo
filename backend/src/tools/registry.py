@@ -107,6 +107,16 @@ def screen_paper(paper_id: str, criteria: str) -> dict[str, Any]:
 
 
 # ─────────────────────────────────────────────
+# RAG Tools（由 rag/as_tool.py 提供）
+# ─────────────────────────────────────────────
+try:
+    from rag.as_tool import chunk_document, build_rag_index, retrieve_chunks, reset_rag_state
+    _RAG_TOOLS_LOADED = True
+except ImportError:
+    _RAG_TOOLS_LOADED = False
+    chunk_document = build_rag_index = retrieve_chunks = reset_rag_state = None  # type: ignore
+
+# ─────────────────────────────────────────────
 # 注册表（name → tool 函数对象）
 # ─────────────────────────────────────────────
 
@@ -114,6 +124,11 @@ _REGISTRY: dict[str, Any] = {
     # ── 业务 agent tools（stub，真实实现由 tools 负责人替换）──
     "pubmed_search": pubmed_search,
     "screen_paper": screen_paper,
+    # ── RAG tools ───────────────────────────────────────────
+    "chunk_document": chunk_document,
+    "build_rag_index": build_rag_index,
+    "retrieve_chunks": retrieve_chunks,
+    "reset_rag_state": reset_rag_state,
 }
 
 # ── test_agent 专属 mock tools（若加载成功则注册）──
