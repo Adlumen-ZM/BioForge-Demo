@@ -24,7 +24,8 @@ from langchain_core.tools import tool
 try:
     from backend.src.tools.search.pubmed_search import pubmed_search as _real_pubmed_search
     _PUBMED_SEARCH_LOADED = True
-except ImportError:
+except Exception:
+    # ImportError / SyntaxError（间接依赖语法问题）均降级为 stub
     _PUBMED_SEARCH_LOADED = False
     _real_pubmed_search = None  # type: ignore
 
@@ -34,7 +35,8 @@ except ImportError:
 try:
     from backend.src.tools.screen.screen_paper import screen_paper as _real_screen_paper
     _SCREEN_PAPER_LOADED = True
-except ImportError:
+except Exception:
+    # ImportError / SyntaxError（间接依赖语法问题）均降级为 stub
     _SCREEN_PAPER_LOADED = False
     _real_screen_paper = None  # type: ignore
 
@@ -43,21 +45,22 @@ except ImportError:
 # download_paper.py 内部已将 metapub/paperscraper 改为延迟导入，
 # 缺少 unidecode 等间接依赖时模块仍可加载，工具在调用阶段才失败（返回 download_status=failed）。
 # ─────────────────────────────────────────────
-_agent_mode = os.getenv(“GRAPH_AGENT_MODE”, “demo”).lower()
+_agent_mode = os.getenv("GRAPH_AGENT_MODE", "demo").lower()
 _DOWNLOAD_PAPER_LOADED = False
 _download_paper_tool = None  # type: ignore
 try:
-    if _agent_mode in (“real”, “demo”):
+    if _agent_mode in ("real", "demo"):
         from backend.src.tools.screen.download_paper import download_paper as _download_paper_tool
     else:
         from backend.src.tools.screen.download_paper_mock import download_paper as _download_paper_tool
     _DOWNLOAD_PAPER_LOADED = True
-except ImportError as _dp_import_err:
-    # download_paper.py 本身的基础依赖（如 biopython/langchain-core）缺失；极少见
+except Exception as _dp_import_err:
+    # ImportError / SyntaxError（间接依赖语法问题）均在此捕获，降级为不注册
     import warnings as _warnings
     _warnings.warn(
-        f”[tools.registry] download_paper 加载失败（{_dp_import_err}）；”
-        “请确认容器内已安装 biopython 和 langchain-core。”,
+        f"[tools.registry] download_paper 加载失败"
+        f"（{type(_dp_import_err).__name__}: {_dp_import_err}）；"
+        "请确认容器内已安装 biopython 和 langchain-core。",
         stacklevel=2,
     )
     _DOWNLOAD_PAPER_LOADED = False
@@ -73,7 +76,8 @@ try:
         retrieve_pdf_evidence,
     )
     _RAG_PAPER_TOOLS_LOADED = True
-except ImportError:
+except Exception:
+    # ImportError / SyntaxError / EnvironmentError（RAGFlow 环境变量未配置）均不注册
     _RAG_PAPER_TOOLS_LOADED = False
     run_bio_paper_extraction_pipeline = parse_pdf_with_ragflow = retrieve_pdf_evidence = None  # type: ignore
 
@@ -99,7 +103,8 @@ try:
     from backend.src.tools.test_agent.mock_binding_analysis import mock_binding_analysis
     from backend.src.tools.test_agent.mock_generate_report import mock_generate_report
     _TEST_TOOLS_LOADED = True
-except ImportError:
+except Exception:
+    # ImportError / SyntaxError（间接依赖语法问题）均降级为不注册
     _TEST_TOOLS_LOADED = False
     mock_success = mock_fail = mock_slow = mock_flaky = mock_rich_output = None  # type: ignore
     mock_literature_search = mock_fetch_details = mock_binding_analysis = mock_generate_report = None  # type: ignore

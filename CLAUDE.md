@@ -54,7 +54,7 @@ backend/src/
 │   ├── extract_agent/       ← ExtractAgent（旧 MVP，原样不动）
 │   └── _template/           ← 新 agent 的骨架模具
 ├── tools/
-│   ├── registry.py          ← get_tools(names) 工具注册表（懒加载，ImportError 降级为 stub）
+│   ├── registry.py          ← get_tools(names) 工具注册表（懒加载，Exception 捕获含 SyntaxError 的一切导入失败，降级为 stub）
 │   ├── search/              ← PubMed 检索工具
 │   │   ├── __init__.py
 │   │   └── pubmed_search.py ← pubmed_search()，Biopython Entrez，多批次 efetch，0.35s 节流
