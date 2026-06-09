@@ -165,28 +165,29 @@ def main():
     mode  = os.getenv("GRAPH_AGENT_MODE", "demo")
     graph = build_graph(mode=mode, checkpointer=checkpointer)
 
-    input_data = {"run_id": run_id}
+    input_data  = {"run_id": run_id}
+    final_state: dict = {}
 
     try:
-        final_state, was_confirmed = run_guide_conversation(
+        was_confirmed = run_guide_conversation(
             graph=graph,
             input_data=input_data,
             session=session,
         )
 
-        # ── 步骤 7-9：流水线执行 ─────────────────────────────────────────────
+        # ── 步骤 7-9：流水线执行（pipeline_view 驱动真实 graph.stream）──────
         if was_confirmed:
             final_state = run_pipeline_view(
                 graph=graph,
-                final_state=final_state,
-                trace_manager=trace_manager,   # 传入 manager，Live 面板显示 trace 日志
+                session=session,
+                trace_manager=trace_manager,
             )
 
             # 记录历史
             session.add_history({
-                "run_id": run_id,
-                "status": "success",
-                "summary": "流水线执行完成",
+                "run_id":  run_id,
+                "status":  final_state.get("status", "success"),
+                "summary": f"流水线执行完成 status={final_state.get('status', '?')}",
             })
 
             # ── 步骤 10：REPL（规划中）──────────────────────────────────────

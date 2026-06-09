@@ -69,12 +69,13 @@ backend/src/
 ├── graph/
 │   ├── state.py             ← PipelineState TypedDict（+ guide / file_asset / DB / finalize 字段）
 │   ├── pipeline.py          ← build_graph()，StateGraph 7 节点：
-│   │                            START→guide→search→screen→prepare_extraction_context
+│   │                            START→guide→init_business_db→search→screen
 │   │                                →extract→write_rag_csv_to_db→finalize→END
 │   │                            条件边：search/screen/extract 均可短路到 finalize
+│   │                            重试：search/screen 节点内置指数退避重试（最多 3 次）
 │   ├── factory.py           ← _AGENTS dict，create_agent()；_wrap_screen() demo/real 使用真实 AgentTemplate
-│   └── nodes.py             ← guide_node / search_node / screen_node /
-│                                prepare_extraction_context_node / extract_node /
+│   └── nodes.py             ← guide_node / prepare_extraction_context_node（=init_business_db）/
+│                                search_node / screen_node / extract_node /
 │                                write_db_node / finalize_node（+ init_db_node 向后兼容保留）
 ├── cli/                     ← CLI 入口集合
 │   ├── __init__.py          ← 导出 main()
@@ -82,7 +83,7 @@ backend/src/
 │   ├── run_demo_pipeline.py ← 非交互式 Demo 入口（自动确认 Guide interrupt）：
 │   │                            python -m backend.src.cli.run_demo_pipeline \
 │   │                              --profile hap_peptide_v1 --mode demo
-│   ├── app.py               ← 10 步编排流程（交互式）：
+│   ├── app.py               ← 10 步编排流程（交互式）；pipeline 由 pipeline_view 驱动：
 │   │                            1-2. system_check + banner 显示
 │   │                            3. 初始化 CLISession
 │   │                            4-6. 三步 interrupt 对话
@@ -96,10 +97,12 @@ backend/src/
 │   │                            - _render_schema_table(): 字段表格
 │   │                            - _render_criteria_panel(): 过滤规则面板
 │   │                            - run_guide_conversation(): 完整三步流程
-│   └── pipeline_view.py     ← 流水线实时进度面板：
+│   └── pipeline_view.py     ← 流水线实时进度面板（驱动真实 graph.stream）：
 │                                - NodeStatus/NodeMetrics: 状态和度量
-│                                - build_pipeline_table(): rich.Table 构造
-│                                - run_pipeline_view(): rich.Live 实时更新
+│                                - run_pipeline_view(graph, session, trace_manager):
+│                                    调用 graph.stream(Command(resume=0)) 驱动执行
+│                                    Live 实时更新进度，结束后打印摘要 Panel
+│                                    （检索式、候选数、PDF 路径、DB 路径）
 ├── config/                  ← 配置层（TODO）
 └── db_access/
     ├── trace/               ← Trace 数据库（hooks.py 替代旧 trace_logger.py）

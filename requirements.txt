@@ -23,6 +23,12 @@ numpy>=1.20.0
 # ==================== 相关度分析 ====================
 rank-bm25>=0.2.2
 
+# ==================== BGE-M3 嵌入模型（RAGFlow 混合检索依赖）====================
+# BGEHybridRetriever 在运行时加载 BAAI/bge-m3 权重（首次自动下载 ~1.3 GB）
+# Docker 镜像构建时预先运行：
+#   python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
+sentence-transformers>=2.2.0
+
 # ==================== AgentTemplate 层核心依赖 ====================
 
 # LLM 调用层（provider-agnostic）

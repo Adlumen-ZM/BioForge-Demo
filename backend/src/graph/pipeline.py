@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 pipeline.py — BioForge LangGraph 流水线编排
 
@@ -6,12 +7,12 @@ pipeline.py — BioForge LangGraph 流水线编排
 职责：用 LangGraph StateGraph 将节点串联成完整流水线。
 
 节点顺序：
-  START → guide → search → screen →
-  prepare_extraction_context → extract → write_rag_csv_to_db → finalize → END
+  START → guide → init_business_db → search → screen
+        → extract → write_rag_csv_to_db → finalize → END
 
 条件边（短路到 finalize）：
-  search  → finalize：candidate_paper_ids 为空
-  screen  → finalize：pdf_path 为空 / 下载状态非 downloaded|already_exists
+  search  → finalize：search 后 candidate_paper_ids 仍为空（网络重试耗尽）
+  screen  → finalize：所有 PDF 下载均失败（重试耗尽）
   extract → finalize：rag_csv_files 不完整（缺少 5 张表任一）
 
 Checkpointer 说明：
@@ -42,21 +43,29 @@ from .state import PipelineState
 # ── 路由函数 ──────────────────────────────────────────────────────────────────
 
 def _route_after_search(state: PipelineState) -> str:
-    """没有候选文献时直接进入 finalize。"""
+    """search 节点后：无候选文献（重试耗尽）则短路到 finalize。"""
     return "finalize" if not state.get("candidate_paper_ids") else "screen"
 
 
 def _route_after_screen(state: PipelineState) -> str:
-    """没有成功下载的 PDF 时直接进入 finalize。"""
-    pdf_path  = state.get("pdf_path")
-    dl_status = state.get("download_status")
-    if not pdf_path or dl_status not in ("downloaded", "already_exists"):
+    """screen 节点后：所有 PDF 下载均失败则短路到 finalize；只要有一篇成功则继续 extract。"""
+    download_results = state.get("download_results") or []
+    successful = [
+        r for r in download_results
+        if r.get("download_status") in ("downloaded", "already_exists")
+    ]
+    # 兼容旧格式：download_results 为空时回退到 pdf_path 字段判断
+    if not download_results:
+        pdf_path  = state.get("pdf_path")
+        dl_status = state.get("download_status")
+        if pdf_path and dl_status in ("downloaded", "already_exists"):
+            return "extract"
         return "finalize"
-    return "prepare_extraction_context"
+    return "extract" if successful else "finalize"
 
 
 def _route_after_extract(state: PipelineState) -> str:
-    """RAG CSV 不完整时直接进入 finalize。"""
+    """extract 节点后：RAG CSV 不完整则短路到 finalize。"""
     rag_csv_files = state.get("rag_csv_files") or {}
     required = {
         "paper", "paper_entity_record", "entity_component",
@@ -100,6 +109,9 @@ def build_graph(
 ):
     """构建并编译 BioForge 流水线图。
 
+    节点顺序：guide → init_business_db → search → screen
+             → extract → write_rag_csv_to_db → finalize
+
     Args:
         mode:         agent 运行模式（"mock" / "demo" / "real"）。
         checkpointer: LangGraph checkpointer 实例（如 MemorySaver）。
@@ -111,33 +123,31 @@ def build_graph(
     builder = StateGraph(PipelineState)
 
     # guide 不经过 _with_defaults（interrupt 语义不同，mode 在 build_guide_node 已注入）
-    builder.add_node("guide",                      guide_node)
-    builder.add_node("search",                     _with_defaults(search_node,                     mode))
-    builder.add_node("screen",                     _with_defaults(screen_node,                     mode))
-    builder.add_node("prepare_extraction_context", _with_defaults(prepare_extraction_context_node,  mode))
-    builder.add_node("extract",                    _with_defaults(extract_node,                    mode))
-    builder.add_node("write_rag_csv_to_db",        _with_defaults(write_db_node,                   mode))
-    builder.add_node("finalize",                   _with_defaults(finalize_node,                   mode))
+    builder.add_node("guide",               guide_node)
+    # init_business_db：初始化 SQLite + 加载 RAG contract，在 search 前准备好
+    builder.add_node("init_business_db",    _with_defaults(prepare_extraction_context_node, mode))
+    builder.add_node("search",              _with_defaults(search_node,    mode))
+    builder.add_node("screen",              _with_defaults(screen_node,    mode))
+    builder.add_node("extract",             _with_defaults(extract_node,   mode))
+    builder.add_node("write_rag_csv_to_db", _with_defaults(write_db_node,  mode))
+    builder.add_node("finalize",            _with_defaults(finalize_node,  mode))
 
-    # 线性边
-    builder.add_edge(START,   "guide")
-    builder.add_edge("guide", "search")
+    # 线性边：guide 完成后先初始化 DB
+    builder.add_edge(START,            "guide")
+    builder.add_edge("guide",          "init_business_db")
+    builder.add_edge("init_business_db", "search")
 
     # 条件边：search / screen / extract 可短路到 finalize
     builder.add_conditional_edges(
-        "search",
-        _route_after_search,
+        "search", _route_after_search,
         {"screen": "screen", "finalize": "finalize"},
     )
     builder.add_conditional_edges(
-        "screen",
-        _route_after_screen,
-        {"prepare_extraction_context": "prepare_extraction_context", "finalize": "finalize"},
+        "screen", _route_after_screen,
+        {"extract": "extract", "finalize": "finalize"},
     )
-    builder.add_edge("prepare_extraction_context", "extract")
     builder.add_conditional_edges(
-        "extract",
-        _route_after_extract,
+        "extract", _route_after_extract,
         {"write_rag_csv_to_db": "write_rag_csv_to_db", "finalize": "finalize"},
     )
     builder.add_edge("write_rag_csv_to_db", "finalize")

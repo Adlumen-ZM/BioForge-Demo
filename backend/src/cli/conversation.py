@@ -202,19 +202,14 @@ def run_guide_conversation(
     graph: Any,
     input_data: dict[str, Any],
     session: Any,
-) -> tuple[dict[str, Any], bool]:
-    """运行 Guide Agent 四步对话流程（interrupt/resume 完整实现）。
+) -> bool:
+    """运行 Guide Agent 四步对话流程（interrupt/resume）。
 
     流程：
       1. graph.stream(input_data) → 等第一个 interrupt（Q1 研究目标）
       2. 渲染 Q1 → 用户 Enter → Command(resume=0)
-      3. 等第二个 interrupt（Q2 研究对象边界）
-      4. 渲染 Q2 → 用户 Enter → Command(resume=0)
-      5. 等第三个 interrupt（Q3 字段模板）
-      6. 渲染 Q3 → 用户 Enter → Command(resume=0)
-      7. 等第四个 interrupt（Q4 进入 pipeline）
-      8. 渲染 Q4 → 用户 Enter → Command(resume=0)
-      9. graph 完成，读取最终 state
+      3-8. 重复 Q2/Q3/Q4
+      9. Q4 确认后返回 True；pipeline 执行由 pipeline_view.run_pipeline_view() 负责
 
     Args:
         graph:      编译后的 LangGraph StateGraph（带 MemorySaver checkpointer）。
@@ -222,7 +217,7 @@ def run_guide_conversation(
         session:    CLISession 实例（提供 thread_id）。
 
     Returns:
-        (final_state, was_confirmed)
+        was_confirmed: 用户完成四步确认则 True，中断/出错则 False。
     """
     from langgraph.types import Command
 
@@ -231,7 +226,7 @@ def run_guide_conversation(
 
     try:
         # ── 4 次 interrupt（Q1 → Q2 → Q3 → Q4）──────────────────────────
-        for i in range(4):
+        for _i in range(4):
             payload = _stream_until_interrupt(graph, current, config)
             if payload:
                 _render_interrupt(payload)
@@ -239,19 +234,12 @@ def run_guide_conversation(
             # 第一次用 input_data 启动，后续都用 Command(resume=0) 继续
             current = Command(resume=0)
 
-        # ── 最终 resume：guide_node 完成，后续 pipeline 节点执行 ──────────
-        # 此次 stream 会运行完 guide → search → screen → extract
-        for _ in graph.stream(Command(resume=0), config=config):
-            pass
-
-        final_state = dict(graph.get_state(config).values)
-
         console.print("[bold green]✅ 任务配置已确认，准备启动流水线[/bold green]\n")
-        return final_state, True
+        return True
 
     except KeyboardInterrupt:
         console.print("\n[yellow]引导对话已中断[/yellow]\n")
-        return {}, False
+        return False
     except Exception as e:
         console.print(f"\n[red]引导对话出错：{e}[/red]\n")
-        return {}, False
+        return False
