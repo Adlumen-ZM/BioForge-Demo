@@ -191,18 +191,41 @@ def _extract_final_message(invoke_result: dict) -> str:
     return content if isinstance(content, str) else str(content)
 
 
+def _normalize_quotes(text: str) -> str:
+    """将 LLM 常见的非 ASCII 引号替换为 JSON 合法的 ASCII 引号。
+
+    部分中文 LLM（如 MiniMax、Doubao）会在 JSON 输出中使用中文弯引号，
+    导致 json.loads 报 SyntaxError: invalid character (U+201C/U+201D)。
+    此函数在所有 json.loads 调用前统一做归一化处理。
+    """
+    # 中文左右双引号 → ASCII 双引号
+    text = text.replace("“", '"').replace("”", '"')
+    # 中文左右单引号 → ASCII 单引号
+    text = text.replace("‘", "'").replace("’", "'")
+    # 全角引号（另一种常见变体）
+    text = text.replace("＂", '"').replace("＇", "'")
+    return text
+
+
 def _extract_output(text: str, step: PlanStep) -> dict[str, Any]:
     """将 agent 输出文本解析为结构化 dict。
 
     解析策略（三层 fallback）：
       1. 尝试提取 ```json ... ``` 代码块并解析。
       2. 尝试直接 JSON 解析（整个 text）。
-      3. Fallback：将文本整体存入 {'raw_output': text}，让 validator 决定是否通过。
+      3. 从文本中提取第一个 { 到最后一个 } 之间的内容。
+      4. Fallback：将文本整体存入 {'raw_output': text}，让 validator 决定是否通过。
+
+    所有 json.loads 调用前统一经过 _normalize_quotes() 处理，
+    消除中文 LLM 输出的弯引号（U+201C/U+201D）导致的 SyntaxError。
 
     扩展点：
       - 需要严格结构化输出时，可在此接入 instructor 库，
         使用 step.success_criteria 中的 schema 进行 schema binding。
     """
+    # 预处理：归一化非 ASCII 引号，避免 json.loads SyntaxError
+    text = _normalize_quotes(text)
+
     # 策略 1：提取 ```json 代码块（确保结果为 dict，避免 LLM 输出 list 导致 .items() 崩溃）
     json_block = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if json_block:
@@ -261,7 +284,10 @@ def _reconstruct_from_tool_messages(messages: list, step: PlanStep) -> dict[str,
                 continue
             try:
                 content = msg.content
-                tool_result = json.loads(content) if isinstance(content, str) else content
+                if isinstance(content, str):
+                    tool_result = json.loads(_normalize_quotes(content))
+                else:
+                    tool_result = content
                 if not isinstance(tool_result, dict):
                     continue
 
