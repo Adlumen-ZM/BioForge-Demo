@@ -143,6 +143,34 @@ def _build_renderable(
     return Group(table, Rule(style="dim"), log_text)
 
 
+def _apply_live_progress(metrics: dict[str, NodeMetrics], trace_manager: Any = None) -> None:
+    """用 trace manager 的共享进度补充节点运行中的 detail。"""
+    if trace_manager is None:
+        return
+
+    progress = getattr(trace_manager, "progress_state", {}) or {}
+    screen_progress = progress.get("screen_download") or {}
+    screen_metrics = metrics.get("screen")
+    if screen_metrics is None or screen_metrics.status != NodeStatus.RUNNING:
+        return
+
+    done = int(screen_progress.get("done", 0))
+    ok = int(screen_progress.get("ok", 0))
+    failed = int(screen_progress.get("failed", 0))
+    retry_attempt = int(screen_progress.get("retry_attempt", 0))
+    current_pmid = screen_progress.get("current_pmid") or ""
+    last_reason = screen_progress.get("last_failure_reason") or ""
+
+    parts = [f"下载中 {done} 篇", f"成功 {ok}", f"失败 {failed}"]
+    if retry_attempt > 0:
+        parts.append(f"重试 {retry_attempt}")
+    if current_pmid:
+        parts.append(f"PMID {current_pmid}")
+    elif last_reason:
+        parts.append(last_reason[:18])
+    screen_metrics.detail = "  ".join(parts)
+
+
 # ── 节点完成后更新度量 ────────────────────────────────────────────────────────
 
 def _enrich_after_node(metrics: dict[str, NodeMetrics], node_name: str, state: dict) -> None:
@@ -161,7 +189,8 @@ def _enrich_after_node(metrics: dict[str, NodeMetrics], node_name: str, state: d
     elif node_name == "screen":
         dl = state.get("download_results") or []
         ok_dl = [r for r in dl if r.get("download_status") in ("downloaded", "already_exists")]
-        m.detail = f"下载 {len(ok_dl)}/{len(dl)} 篇"
+        failed = len(dl) - len(ok_dl)
+        m.detail = f"下载 {len(ok_dl)}/{len(dl)} 篇  失败 {failed}"
     elif node_name == "extract":
         files = state.get("rag_csv_files") or {}
         q = state.get("csv_quality_status") or "?"
@@ -313,6 +342,7 @@ def run_pipeline_view(
         ) as live:
 
             def refresh():
+                _apply_live_progress(metrics, trace_manager)
                 live.update(_build_renderable(metrics, log_buffer))
 
             # 触发 guide 最终 resume → pipeline 开始执行

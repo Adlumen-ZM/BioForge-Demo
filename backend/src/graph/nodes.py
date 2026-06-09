@@ -546,6 +546,16 @@ def screen_node(state: PipelineState) -> dict[str, Any]:
             "download_status":  dl_status,
         },
     )
+    if download_report_path:
+        _trace_safe(
+            "download_report_saved",
+            stage="screen",
+            payload={
+                "download_report_path": download_report_path,
+                "success_count": len(successful),
+                "failed_count": len(download_results) - len(successful),
+            },
+        )
 
     _trace_safe("screen_finished", stage="screen",
                 payload={

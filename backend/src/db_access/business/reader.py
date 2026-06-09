@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[5]
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _SCHEMA_DIR   = _PROJECT_ROOT / "docs" / "schema_templates"
 
 

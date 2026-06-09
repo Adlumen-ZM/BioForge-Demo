@@ -121,6 +121,7 @@ CLI_NORMAL_EVENTS = frozenset({
     # Screen
     TraceEventType.SCREEN_STARTED,
     TraceEventType.SCREEN_DECISION_MADE,
+    TraceEventType.DOWNLOAD_ATTEMPT_STARTED,
     TraceEventType.PDF_DOWNLOAD_FINISHED,
     TraceEventType.DOWNLOAD_REPORT_SAVED,
     TraceEventType.SCREEN_FINISHED,

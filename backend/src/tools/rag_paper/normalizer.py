@@ -137,10 +137,14 @@ def normalize_to_five_tables(
                 rec_row[req] = _fill_required(None, rec_tbl.get("field_types", {}).get(req, "string"))
         records.append(rec_row)
 
-        # entity_component（从 entity.components 或 sequence 提取）
+        # entity_component（兼容 components 结构，或从 sequence_* 字段兜底）
         comps_raw = entity.get("components") or []
-        if not comps_raw and entity.get("sequence"):
-            comps_raw = [{"sequence": entity["sequence"], "component_order": 1}]
+        sequence_fallback = entity.get("sequence_normalized") or entity.get("sequence_raw")
+        if not comps_raw and sequence_fallback:
+            comps_raw = [{
+                "sequence": sequence_fallback,
+                "component_order": 1,
+            }]
         for idx, comp in enumerate(comps_raw):
             comp_id  = _stable_id("C", rec_id, str(idx))
             comp_row: dict[str, Any] = {comp_pk: comp_id, "record_id": rec_id}
@@ -168,7 +172,7 @@ def normalize_to_five_tables(
             functions.append(func_row)
 
             # function_assay_evidence（从 func.evidence 提取）
-            evids_raw = func.get("evidence") or []
+            evids_raw = func.get("evidence_items") or func.get("evidence") or []
             for eidx, evid in enumerate(evids_raw):
                 evid_id  = _stable_id("E", func_id, str(eidx))
                 evid_row: dict[str, Any] = {evid_pk: evid_id, "function_id": func_id}

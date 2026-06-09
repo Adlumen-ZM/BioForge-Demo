@@ -25,13 +25,13 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from rag_pipeline.extraction.llm_extractor import (
+from rag.extraction.llm_extractor import (
     EntityExtractor,
     ExtractionFormatError,
     PaperExtractor,
     _default_paper_meta,
 )
-from rag_pipeline.retrieval.bge_hybrid_retriever import BGEHybridRetriever
+from rag.retrieval.bge_hybrid_retriever import BGEHybridRetriever
 
 logger = logging.getLogger(__name__)
 

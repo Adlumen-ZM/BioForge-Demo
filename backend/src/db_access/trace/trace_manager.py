@@ -116,6 +116,8 @@ class TraceManager:
 
         # 共享 buffer，供 pipeline_view 的 rich.Live 读取日志行（最近 N 条）
         self.cli_log_buffer: list[str] = []
+        # 共享进度状态，供 CLI Live 面板显示节点内的细粒度进度。
+        self.progress_state: dict[str, Any] = {}
 
     @classmethod
     def create(
@@ -164,7 +166,13 @@ class TraceManager:
             try:
                 from .console_backend import CLIConsoleSink
                 level = os.getenv("TRACE_CLI_LEVEL", cli_level)
-                manager.add_sink(CLIConsoleSink(manager.cli_log_buffer, level=level))
+                manager.add_sink(
+                    CLIConsoleSink(
+                        manager.cli_log_buffer,
+                        progress_state=manager.progress_state,
+                        level=level,
+                    )
+                )
             except Exception as e:
                 print(f"[TraceManager] ⚠️ CLIConsoleSink 初始化失败：{e}")
 

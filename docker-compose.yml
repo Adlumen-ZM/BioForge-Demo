@@ -1,9 +1,9 @@
 version: "3.8"
 
 services:
-  pepclaw:
+  bioforge:
     image: ${DOCKER_IMAGE}:${DOCKER_TAG}
-    container_name: pepclaw-container
+    container_name: bioforge-container
 
     volumes:
       - ./.env:/app/.env
@@ -21,13 +21,10 @@ services:
 
     working_dir: /app
     restart: "no"
-
-    # ── 交互式支持（用于 CLI 对话） ──────────────────────────────────────────
-    # 启用标准输入（stdin_open）和伪终端（tty），支持交互式 CLI 输入
     stdin_open: true
     tty: true
 
-    # 默认不指定 command，容器启动后进入 shell
-    # 用户可通过以下方式覆盖：
-    #   docker-compose run pepclaw python -m backend.src.cli
-    #   docker-compose exec pepclaw python -m backend.src.cli --check-only
+    # Interactive support for CLI input.
+    # Override the default shell command when needed:
+    # docker compose run --rm bioforge python -m backend.src.cli
+    # docker compose run --rm bioforge python -m backend.src.cli --check-only
