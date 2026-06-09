@@ -392,8 +392,21 @@ class DemoGuideAgent:
                 parsed.setdefault("raw_user_prompt", raw_prompt)
                 parsed.setdefault("raw_user_screening_rules", {})
                 validated = GuideOutput(**parsed)
-                return validated.model_dump()
-            return parsed  # Pydantic 不可用时直接返回
+                result = validated.model_dump()
+            else:
+                result = parsed  # Pydantic 不可用时直接返回
+
+            # 展示 Guide Agent 思考摘要（让用户看到分析结果）
+            rtp = result.get("refined_task_prompt", "")
+            rsc = result.get("refined_screening_criteria", {})
+            inc_count = len(rsc.get("inclusion", []))
+            exc_count = len(rsc.get("exclusion", []))
+            preview   = rtp[:120].replace("\n", " ") + ("..." if len(rtp) > 120 else "")
+            print(f"\n  [Guide Agent 分析完成]", flush=True)
+            print(f"  任务描述（预览）：{preview}", flush=True)
+            print(f"  纳入标准：{inc_count} 条  排除标准：{exc_count} 条\n", flush=True)
+
+            return result
 
         except Exception as e:
             print(f"[DemoGuideAgent] ⚠️ LLM 输出处理失败，降级到预设值：{e}")

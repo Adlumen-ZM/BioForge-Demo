@@ -18,6 +18,9 @@ backend/src/cli/conversation.py — Guide Agent 四步中断对话处理
 
 from __future__ import annotations
 
+import sys
+import time
+import threading
 from typing import Any
 
 from rich.console import Console
@@ -26,6 +29,60 @@ from rich.table import Table
 from rich.text import Text
 
 console = Console()
+
+# demo 版本提示（附加在每个确认 Panel 底部）
+_DEMO_NOTE = "[dim]· demo版本暂时不支持修改，正式版可自定义问题和领域[/dim]"
+
+# spinner 帧序列（braille 点阵）
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+
+def _spinning_exec(fn: Any, *args: Any, message: str = "请稍候", **kwargs: Any) -> Any:
+    """在后台线程执行 fn，主线程显示旋转 spinner，执行完成后清除。
+
+    Args:
+        fn:      要执行的可调用对象。
+        *args:   传给 fn 的位置参数。
+        message: spinner 旁边显示的提示文字。
+        **kwargs: 传给 fn 的关键字参数。
+
+    Returns:
+        fn 的返回值。
+
+    Raises:
+        fn 内部抛出的任何异常。
+    """
+    result_ref: list[Any] = [None]
+    exc_ref: list[BaseException | None] = [None]
+    done = threading.Event()
+
+    def _worker() -> None:
+        try:
+            result_ref[0] = fn(*args, **kwargs)
+        except BaseException as e:  # noqa: BLE001
+            exc_ref[0] = e
+        finally:
+            done.set()
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+    i = 0
+    line = ""
+    while not done.wait(timeout=0.08):
+        frame = _SPINNER_FRAMES[i % len(_SPINNER_FRAMES)]
+        line = f"\r  {frame}  {message}  "
+        sys.stderr.write(line)
+        sys.stderr.flush()
+        i += 1
+
+    # 清除 spinner 行
+    sys.stderr.write("\r" + " " * max(len(line), len(message) + 8) + "\r")
+    sys.stderr.flush()
+
+    if exc_ref[0] is not None:
+        raise exc_ref[0]
+    return result_ref[0]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -41,9 +98,13 @@ def _render_q1_goal(payload: dict[str, Any]) -> None:
     content = payload.get("content", "")
     option  = (payload.get("options") or ["确认"])[0]
 
+    body = Text()
+    body.append(content, style="white")
+    body.append(f"\n\n{_DEMO_NOTE}")
+
     console.print(
         Panel(
-            f"[white]{content}[/white]",
+            body,
             title=f"[bold yellow]Q1 · {label}[/bold yellow]",
             subtitle=f"[dim]► {option}[/dim]",
             border_style="cyan",
@@ -71,6 +132,7 @@ def _render_q2_boundary(payload: dict[str, Any]) -> None:
     text.append("\n  排除对象\n", style="bold red")
     for i, item in enumerate(exclusion, 1):
         text.append(f"   {i}. {item}\n", style="red")
+    text.append(f"\n{_DEMO_NOTE}")
 
     console.print(
         Panel(
@@ -107,6 +169,7 @@ def _render_q3_schema(payload: dict[str, Any]) -> None:
     text.append(f"{filling_rules_path}\n", style="white")
     if description:
         text.append(f"\n  {description}\n", style="dim")
+    text.append(f"\n{_DEMO_NOTE}")
 
     console.print(
         Panel(
@@ -128,9 +191,13 @@ def _render_q4_pipeline(payload: dict[str, Any]) -> None:
     content = payload.get("content", "guide → search → screen → extract → database write")
     option  = (payload.get("options") or ["开始"])[0]
 
+    body = Text()
+    body.append(f"  {content}", style="bold white")
+    body.append(f"\n\n{_DEMO_NOTE}")
+
     console.print(
         Panel(
-            f"[bold white]  {content}[/bold white]",
+            body,
             title=f"[bold yellow]Q4 · {label}[/bold yellow]",
             subtitle=f"[dim]► {option}[/dim]",
             border_style="green",
@@ -227,7 +294,18 @@ def run_guide_conversation(
     try:
         # ── 4 次 interrupt（Q1 → Q2 → Q3 → Q4）──────────────────────────
         for _i in range(4):
-            payload = _stream_until_interrupt(graph, current, config)
+            # Q1 前 LLM 调用耗时较长，用 spinner 提示；Q2-Q4 为快速 resume
+            if _i == 0:
+                spinner_msg = "Guide Agent 正在初始化 (LLM 调用中)..."
+            else:
+                spinner_msg = "请稍候..."
+
+            payload = _spinning_exec(
+                _stream_until_interrupt,
+                graph, current, config,
+                message=spinner_msg,
+            )
+
             if payload:
                 _render_interrupt(payload)
                 _wait_for_ok()
