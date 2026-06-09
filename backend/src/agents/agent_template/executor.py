@@ -206,7 +206,18 @@ def _extract_output(text: str, step: PlanStep) -> dict[str, Any]:
         except json.JSONDecodeError:
             pass
 
-    # 策略 3：Fallback — 原文存储，由 validator 的 required_fields 规则捕获失败
+    # 策略 3：从文本中提取第一个 { 到最后一个 } 之间的内容（处理 LLM 在正文中夹杂 JSON 的情况）
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    # 策略 4：Fallback — 原文存储，由 validator 的 required_fields 规则捕获失败
     return {"raw_output": text}
 
 

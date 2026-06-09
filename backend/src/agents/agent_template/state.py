@@ -85,12 +85,14 @@ class TemplateAgentState:
         """返回所有已完成 step 的摘要信息，供 context_builder 注入下一 step。
 
         只返回 status=='success' 的 step，失败/跳过的不提供正向上下文。
+        包含实际 output 数据，让后续 step（如 dedup_filter）能看到前序 step 的结果。
         """
         return [
             {
                 "step_id": r.step_id,
                 "summary": r.summary.model_dump(),
                 "output_keys": list(r.output.keys()),
+                "output": r.output,
             }
             for r in self.step_results
             if r.status == "success"

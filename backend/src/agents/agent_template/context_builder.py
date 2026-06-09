@@ -145,15 +145,17 @@ def _load_skills(skills_dir: Path) -> str:
 def _build_history_section(completed_summaries: list[dict]) -> str:
     """将已完成 step 的摘要格式化为「执行历史」段落，注入下一 step 上下文。
 
-    只传 summary（压缩结果），不传完整 ReAct messages 历史，控制 token 消耗。
+    传 summary + 实际 output 数据，让后续 step 能直接引用前序数据（如 dedup_filter 使用 raw_candidates）。
+    大列表截断至 200 条以控制 token 消耗。
     """
-    lines = ["## 已完成步骤摘要（供参考）"]
+    lines = ["## 已完成步骤摘要及输出数据（供参考）"]
     for s in completed_summaries:
         step_id = s.get("step_id", "unknown")
         summary: dict[str, Any] = s.get("summary", {})
+        output: dict[str, Any] = s.get("output", {})
+
         lines.append(f"\n### step_id: {step_id}")
         lines.append(f"- 执行内容：{summary.get('what_was_done', '—')}")
-        lines.append(f"- 产出结果：{summary.get('what_was_produced', '—')}")
 
         key_numbers = summary.get("key_numbers", {})
         if key_numbers:
@@ -164,7 +166,23 @@ def _build_history_section(completed_summaries: list[dict]) -> str:
         if issues:
             lines.append(f"- 遇到问题：{issues}")
 
+        if output:
+            lines.append(f"- 输出数据：\n```json\n{_truncate_output(output)}\n```")
+
     return "\n".join(lines)
+
+
+def _truncate_output(output: dict[str, Any], max_list_items: int = 200) -> str:
+    """将 output dict 序列化为 JSON，大列表截断至 max_list_items 条。"""
+    import json
+    truncated: dict[str, Any] = {}
+    for k, v in output.items():
+        if isinstance(v, list) and len(v) > max_list_items:
+            truncated[k] = v[:max_list_items]
+            truncated[f"_{k}_note"] = f"已截断，原始共 {len(v)} 条"
+        else:
+            truncated[k] = v
+    return json.dumps(truncated, ensure_ascii=False, indent=2)
 
 
 def _build_upstream_section(upstream_context: dict) -> str:

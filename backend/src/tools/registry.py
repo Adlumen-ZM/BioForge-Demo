@@ -43,7 +43,7 @@ except ImportError:
 # ─────────────────────────────────────────────
 _agent_mode = os.getenv("GRAPH_AGENT_MODE", "demo").lower()
 try:
-    if _agent_mode in ("real",):
+    if _agent_mode in ("real", "demo"):
         from backend.src.tools.screen.download_paper import download_paper as _download_paper_tool
     else:
         from backend.src.tools.screen.download_paper_mock import download_paper as _download_paper_tool

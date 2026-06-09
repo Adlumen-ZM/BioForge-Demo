@@ -126,15 +126,17 @@ steps:
   - step_id: "dedup_filter"
     name: "去重与整理候选文献"
     instruction: |
-      对 raw_candidates 按 PMID（优先）/ DOI / 标准化标题 进行去重，
-      输出最终候选文献列表。
+      你已在上一步（search_execute）获得了 raw_candidates 列表（参见「已完成步骤摘要及输出数据」中的 raw_candidates 字段）。
+      现在对这些 raw_candidates 按以下规则去重，输出最终候选文献列表。
 
       去重规则：
         1. PMID 相同 → 保留第一次出现
         2. DOI 相同（忽略大小写）→ 保留第一次出现
         3. 标题前 80 字符相同（去空格、小写） → 保留第一次出现
 
-      输出 JSON 格式：
+      ⚠️ 重要：只输出以下 JSON，不要输出任何解释文字、前言或后记。
+
+      ```json
       {
         "candidate_paper_ids": ["<PMID>", ...],
         "candidates": [
@@ -156,6 +158,7 @@ steps:
           "after_dedup":    <int>
         }
       }
+      ```
     tools_required: []
     success_criteria:
       required_fields:
@@ -164,5 +167,5 @@ steps:
         - "search_summary"
       min_count:
         candidate_paper_ids: 1
-    max_retries: 1
+    max_retries: 2
     db_write_policy: "none"

@@ -151,9 +151,12 @@ def _build_patch(
     """
     patch: dict[str, Any] = {}
 
-    # 通用：将 final_output 中已知的 PipelineState 字段直接映射
     final = run_result.final_output
 
+    # 先将所有 final_output 字段透传给 nodes 层（nodes 按需读取）
+    patch.update(final)
+
+    # 以下显式覆盖，确保命名与 PipelineState 对齐（冗余但保证正确性）
     if "candidate_paper_ids" in final:
         patch["candidate_paper_ids"] = final["candidate_paper_ids"]
 
