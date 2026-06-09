@@ -331,9 +331,8 @@ def run_pipeline_view(
                         m.status   = NodeStatus.SUCCESS
                         m.end_time = datetime.now()
 
-                        # 从 state 填充摘要信息
-                        snap_vals = graph.get_state(config).values
-                        _enrich_after_node(metrics, node_name, snap_vals)
+                        # 直接用节点输出 dict 填充摘要（避免 graph.get_state 时序问题）
+                        _enrich_after_node(metrics, node_name, _node_output)
                         _trace(
                             "node_finished",
                             stage=f"{node_name}_node",

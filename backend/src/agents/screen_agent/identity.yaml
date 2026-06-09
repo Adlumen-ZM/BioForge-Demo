@@ -27,4 +27,5 @@ constraints:
 output_contract:
   screened_paper_ids: "至少 1 篇，list[str] 类型，每个元素为通过筛选的 PubMed ID 字符串"
   screen_summary: "不超过 200 字的筛选过程摘要，说明筛选标准、筛选数量和排除原因"
-  download_status: "dict 类型，包含 success_count（int）、fail_count（int）、failed_pmids（list[dict]）、supplementary_count（int）"
+  download_results: "list 类型，每个元素为 dict，包含 pmid（str）、paper_key（str）、download_status（downloaded/failed/already_exists）、pdf_path（下载成功时为文件绝对路径，失败时为 null）等字段"
+  download_summary: "不超过 100 字的下载过程摘要，说明尝试总数、成功数和失败原因概述"
