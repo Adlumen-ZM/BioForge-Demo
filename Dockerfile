@@ -34,13 +34,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 如需使用国内镜像，在 build 时传入：--build-arg HF_ENDPOINT=https://hf-mirror.com
 ARG HF_ENDPOINT=https://huggingface.co
 ENV HF_HOME=/hf_cache
+ENV HUGGINGFACE_HUB_CACHE=/hf_cache/hub
+ENV TRANSFORMERS_CACHE=/hf_cache/hub
 ENV HUGGINGFACE_HUB_TOKEN=""
 RUN python -c "\
 import os; \
 os.environ['HF_ENDPOINT'] = '${HF_ENDPOINT}'; \
-from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('BAAI/bge-m3'); \
-print('BGE-M3 download complete')"
+from FlagEmbedding import BGEM3FlagModel; \
+BGEM3FlagModel('BAAI/bge-m3', use_fp16=False); \
+print('BGE-M3 FlagEmbedding load check complete')"
 
 # ========== 第二阶段：运行阶段 ==========
 FROM python:3.11-slim
@@ -63,6 +65,10 @@ RUN mkdir -p /app/data /app/v0_1PDF /app/v0_1results
 # 设置默认环境变量
 ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/hf_cache
+ENV HUGGINGFACE_HUB_CACHE=/hf_cache/hub
+ENV TRANSFORMERS_CACHE=/hf_cache/hub
+ENV BGE_MODEL_DIR=BAAI/bge-m3
+ENV BGE_USE_FP16=false
 ENV BIZ_DB_PATH=/app/data/hap_v01.db
 ENV TRACE_DB_PATH=/app/data/hap_trace.db
 

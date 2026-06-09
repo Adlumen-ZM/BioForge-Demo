@@ -66,9 +66,10 @@ def get_rag_service() -> BioPaperRAGService:
         llm_api_key=llm_api_key,
         llm_base_url=llm_base_url,
         llm_model=llm_model,
-        bge_model_dir=os.environ.get("BGE_MODEL_DIR", "BAAI/bge-m3"),
+        bge_model_dir=_first_env("BGE_MODEL_DIR", "EMBEDDING_MODEL", default="BAAI/bge-m3"),
         bge_use_fp16=os.environ.get("BGE_USE_FP16", "false").lower() == "true",
         retrieval_top_k=int(os.environ.get("RETRIEVAL_TOP_K", "8")),
         retrieval_threshold=float(os.environ.get("RETRIEVAL_THRESHOLD", "0.1")),
+        ragflow_chunk_method=os.environ.get("RAGFLOW_CHUNK_METHOD", "paper"),
     )
     return _SERVICE_INSTANCE

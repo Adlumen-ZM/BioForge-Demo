@@ -18,6 +18,16 @@ services:
       - BIZ_DB_PATH=/app/data/projects/hap_peptide_v1/db/business.sqlite
       - TRACE_DB_PATH=/app/data/hap_trace.db
       - GRAPH_AGENT_MODE=demo
+      - HF_HOME=/hf_cache
+      - HUGGINGFACE_HUB_CACHE=/hf_cache/hub
+      - TRANSFORMERS_CACHE=/hf_cache/hub
+      - BGE_MODEL_DIR=BAAI/bge-m3
+      - BGE_USE_FP16=false
+      - RAGFLOW_CHUNK_METHOD=${RAGFLOW_CHUNK_METHOD:-paper}
+      - RAGFLOW_POLL_TIMEOUT_SEC=${RAGFLOW_POLL_TIMEOUT_SEC:-600}
+      - RAG_USE_CHROMADB=${RAG_USE_CHROMADB:-false}
+      - RAG_MAX_ENTITIES_PER_PAPER=${RAG_MAX_ENTITIES_PER_PAPER:-3}
+      - LLM_TIMEOUT_SEC=${LLM_TIMEOUT_SEC:-120}
 
     working_dir: /app
     restart: "no"

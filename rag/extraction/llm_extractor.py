@@ -359,18 +359,44 @@ def _make_client(api_key: str | None, base_url: str | None):
     return openai.OpenAI(
         api_key=api_key or os.environ.get("OPENAI_API_KEY"),
         base_url=base_url,
+        timeout=float(os.getenv("LLM_TIMEOUT_SEC", "120")),
     )
+
+
+def _extract_json_text(raw: str) -> str:
+    """兼容部分 OpenAI-compatible 服务在 JSON mode 下仍返回 ```json 代码块。"""
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].lstrip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    start_obj = text.find("{")
+    start_arr = text.find("[")
+    starts = [i for i in (start_obj, start_arr) if i != -1]
+    if not starts:
+        return text
+    start = min(starts)
+    end = max(text.rfind("}"), text.rfind("]"))
+    if end > start:
+        return text[start:end + 1]
+    return text
 
 
 def _parse_and_validate(raw: str, schema: Dict, label: str) -> Dict[str, Any]:
     """解析 JSON 字符串并做 Schema 二次校验，失败时抛 ExtractionFormatError。"""
     try:
-        data = json.loads(raw)
+        data = json.loads(_extract_json_text(raw))
     except json.JSONDecodeError as e:
         # [E7] 截断 raw，避免将大段 LLM 响应（含版权文本）写入日志
         raise ExtractionFormatError(
             f"JSON 解析失败（{label}）: {e}\n原始响应（前500字符）: {raw[:500]!r}"
         ) from e
+    if label == "paper_meta" and isinstance(data, dict):
+        _coerce_paper_meta(data)
     try:
         jsonschema.validate(instance=data, schema=schema)
     except jsonschema.ValidationError as e:
@@ -378,6 +404,21 @@ def _parse_and_validate(raw: str, schema: Dict, label: str) -> Dict[str, Any]:
             f"Schema 校验失败（{label}）: {e.message}\n原始数据: {data}"
         ) from e
     return data
+
+
+def _coerce_paper_meta(data: Dict[str, Any]) -> None:
+    """把 OpenAI-compatible 模型常见的 null 必填字段收敛到 schema 可接受值。"""
+    for field in ("title", "journal_title"):
+        if data.get(field) in (None, ""):
+            data[field] = "Unknown"
+    if data.get("full_text_availability") not in {
+        "open_access", "subscription", "preprint", "unknown",
+    }:
+        data["full_text_availability"] = "unknown"
+    if data.get("retrieval_source") not in {
+        "pubmed", "crossref", "manual_entry", "agent_crawl",
+    }:
+        data["retrieval_source"] = "manual_entry"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
