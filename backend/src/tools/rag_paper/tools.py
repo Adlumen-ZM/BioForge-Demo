@@ -42,23 +42,39 @@ from .service_factory import get_rag_service
     "run_bio_paper_extraction_pipeline",
     args_schema=RunBioPaperPipelineInput,
 )
-def run_bio_paper_extraction_pipeline(pdf_path: str) -> dict:
+def run_bio_paper_extraction_pipeline(
+    pdf_path: str,
+    output_dir: str,
+    template_id: str = "hap_peptide_v1",
+    schema_template_path: str | None = None,
+    overwrite: bool = False,
+) -> dict:
     """
-    对单篇生物矿化 / HAp 领域 PDF 执行端到端结构化抽取。
+    对单篇生物矿化 / HAp 领域 PDF 执行端到端结构化抽取，输出五表 CSV。
 
     内部自动完成：
-      RAGFlow 视觉解析 -> 盲盒实体发现（Scout）-> BGE-M3 混合检索（Strike）-> LLM 字段抽取
+      RAGFlow 视觉解析 → 盲盒实体发现（Scout）→ BGE-M3 混合检索（Strike）
+      → LLM 字段抽取 → 枚举归一化 → hap_peptide_v1 五表 CSV 写出
 
     返回值包含：
-      - paper_meta : 论文元数据（标题、作者、DOI、期刊、年份）
-      - entities   : 结构化实体列表，每项含实体类型、字段值、证据 chunk 引用
+      - output_dir  : CSV 输出目录路径
+      - csv_files   : {table_name: absolute_path}（五张 CSV 的路径）
+      - tables      : {table_name: {rows: n}}（各表行数）
+      - paper_meta  : 论文元数据
+      - entities    : 原始实体列表
 
-    适用场景：extract_agent 在不需要手动拆解步骤时直接调用（黑盒一键抽取）。
+    适用场景：extract_agent 一键完成从 PDF 到 CSV 的完整抽取。
     """
     if not Path(pdf_path).exists():
         raise FileNotFoundError(f"PDF 文件不存在: {pdf_path}")
     service = get_rag_service()
-    return service.run_pipeline(pdf_path)
+    return service.run_pipeline(
+        pdf_path=pdf_path,
+        output_dir=output_dir,
+        template_id=template_id,
+        schema_template_path=schema_template_path,
+        overwrite=overwrite,
+    )
 
 
 @tool(

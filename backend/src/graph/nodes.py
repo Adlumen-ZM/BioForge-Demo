@@ -4,32 +4,43 @@ nodes.py — BioForge LangGraph 节点定义
 位置：backend/src/graph/
 职责：将各 agent 包装为 LangGraph 节点函数，供 pipeline.py 注册到 StateGraph。
 
-节点顺序：guide → search → screen → extract
+节点顺序：guide → search → screen → prepare_extraction_context → extract → write_rag_csv_to_db → finalize
 
-guide  节点：通过 LangGraph interrupt() 三步对话产出三件核心物，需要 checkpointer
-search 节点：调用 SearchAgent 检索 PubMed
-screen 节点：调用 ScreenAgent 相关性筛选
-extract节点：调用 ExtractAgent 结构化抽取
+guide                        — LangGraph interrupt() 四步对话，需要 checkpointer
+search                       — SearchAgent：PubMed 多轮检索
+screen                       — ScreenAgent：相关性筛选 + PDF 下载
+prepare_extraction_context   — 初始化业务 DB + 加载 RAG contract（Extraction 阶段准备）
+extract                      — ExtractAgent：RAG CSV 生成
+write_rag_csv_to_db          — CSV → SQLite 写入
+finalize                     — 生成 summary.json + timeline.md
 """
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any
 
 from backend.src.agents.guide_agent.agent import build_guide_node
+from backend.src.db_access.business import (
+    ensure_business_db,
+    get_rag_extraction_contract,
+    write_rag_csv_to_business_db,
+)
 from .factory import create_agent, get_agent_mode
 from .state import PipelineState
 
 
 # ── Guide 节点（interrupt 机制，不走 AgentTemplate）────────────────────────
-# GRAPH_AGENT_MODE=demo 时使用 DemoGuideAgent（正常调用 LLM）
-# GRAPH_AGENT_MODE=real 时使用 RealGuideAgent（任意任务模式，v0.1 暂降级到 demo）
+# GRAPH_AGENT_MODE 在模块导入时读取；run_demo_pipeline.py 需在 import nodes 前设置该变量
 guide_node = build_guide_node(
     mode=os.getenv("GRAPH_AGENT_MODE", "demo"),
     model=os.getenv("DEFAULT_LLM_MODEL"),
 )
 
+
+# ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
 def _mode(state: PipelineState) -> str:
     return get_agent_mode(state.get("agent_mode"))
@@ -50,26 +61,285 @@ def _is_ok(output: dict[str, Any]) -> bool:
     return metadata.get("status") in {None, "success"}
 
 
+def _save_artifact(artifacts_dir: str | None, filename: str, data: Any) -> str | None:
+    """将 data 序列化为 JSON 并写入 artifacts_dir/{filename}，返回路径。"""
+    if not artifacts_dir:
+        return None
+    try:
+        Path(artifacts_dir).mkdir(parents=True, exist_ok=True)
+        path = str(Path(artifacts_dir) / filename)
+        Path(path).write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return path
+    except Exception:
+        return None
+
+
+# ── init_db_node（保留向后兼容，不再注册到主 pipeline）─────────────────────
+
+def init_db_node(state: PipelineState) -> dict[str, Any]:
+    """初始化业务 SQLite 数据库（旧接口，保留向后兼容；主 pipeline 使用 prepare_extraction_context_node）。"""
+    template_id        = state.get("template_id") or os.getenv("EXTRACTION_PROFILE", "hap_peptide_v1")
+    extraction_profile = state.get("extraction_profile") or template_id
+    db_path            = state.get("biz_db_path")
+
+    result = ensure_business_db(
+        template_id=template_id,
+        extraction_profile=extraction_profile,
+        db_path=db_path,
+    )
+
+    updates: dict[str, Any] = {
+        "current_stage":      "search",
+        "biz_db_init_result": result,
+        "template_id":        template_id,
+        "extraction_profile": extraction_profile,
+    }
+    if result.get("status") == "ok":
+        updates["biz_db_path"] = result["db_path"]
+        updates["ok"] = True
+    else:
+        updates["ok"] = False
+        updates["current_stage"] = "error"
+        updates["errors"] = _existing_errors(state) + [
+            _error("init_db", result.get("error") or "业务数据库初始化失败")
+        ]
+    return updates
+
+
+# ── prepare_extraction_context_node（Extraction 阶段准备）────────────────────
+
+def prepare_extraction_context_node(state: PipelineState) -> dict[str, Any]:
+    """
+    Extraction 阶段准备节点（位于 screen 之后，extract 之前）：
+      1. 初始化业务 SQLite 数据库
+      2. 加载 RAG extraction contract
+      3. 推导 schema_template_path / field_mapping_path
+    """
+    template_id        = state.get("template_id") or os.getenv("EXTRACTION_PROFILE", "hap_peptide_v1")
+    extraction_profile = state.get("extraction_profile") or template_id
+
+    # 1. 初始化业务 DB
+    db_result = ensure_business_db(
+        template_id=template_id,
+        extraction_profile=extraction_profile,
+        db_path=state.get("biz_db_path"),
+    )
+
+    # 2. 加载 RAG extraction contract
+    contract: dict[str, Any] = {}
+    try:
+        contract = get_rag_extraction_contract(template_id=template_id)
+    except Exception as exc:
+        pass  # contract 为空时 extract_node 仍可运行（工具内部会重新加载）
+
+    # 3. 推导模板文件路径
+    project_root = Path(__file__).resolve().parents[4]
+    schema_template_path = (
+        state.get("schema_template_path")
+        or os.getenv("SCHEMA_TEMPLATE_PATH")
+        or str(project_root / "docs" / "schema_templates" / template_id / "schema.yaml")
+    )
+    field_mapping_path = (
+        os.getenv("FIELD_MAPPING_PATH")
+        or str(project_root / "docs" / "schema_templates" / template_id / "field_mapping.yaml")
+    )
+
+    ok = db_result.get("status") == "ok"
+    updates: dict[str, Any] = {
+        "current_stage":        "extract",
+        "biz_db_path":          db_result.get("db_path"),
+        "biz_db_init_result":   db_result,
+        "rag_extraction_contract": contract,
+        "schema_template_path": schema_template_path,
+        "field_mapping_path":   field_mapping_path,
+        "template_id":          template_id,
+        "extraction_profile":   extraction_profile,
+    }
+    if not ok:
+        updates["ok"] = False
+        updates["errors"] = _existing_errors(state) + [
+            _error("prepare_extraction_context", db_result.get("error") or "业务数据库初始化失败")
+        ]
+    return updates
+
+
+# ── write_db_node（CSV → SQLite，保留原名和别名）────────────────────────────
+
+def write_db_node(state: PipelineState) -> dict[str, Any]:
+    """将 RAG 输出的多表 CSV 写入业务 SQLite 数据库。"""
+    csv_dir            = state.get("rag_csv_dir")
+    db_path            = state.get("biz_db_path")
+    template_id        = state.get("template_id") or os.getenv("EXTRACTION_PROFILE", "hap_peptide_v1")
+    extraction_profile = state.get("extraction_profile") or template_id
+    run_id             = state.get("run_id")
+    paper_key          = state.get("paper_key")
+
+    if not csv_dir:
+        return {
+            "current_stage": "done",
+            "ok": True,
+            "db_write_result": {"status": "skipped", "reason": "rag_csv_dir 未设置"},
+        }
+
+    result = write_rag_csv_to_business_db(
+        csv_dir=csv_dir,
+        db_path=db_path,
+        template_id=template_id,
+        extraction_profile=extraction_profile,
+        run_id=run_id,
+        paper_key=paper_key,
+    )
+
+    ok = result.get("status") == "ok"
+    updates: dict[str, Any] = {
+        "current_stage": "done" if ok else "error",
+        "ok":            ok,
+        "db_write_result": result,
+    }
+    if not ok:
+        updates["errors"] = _existing_errors(state) + [
+            _error("write_db", result.get("error") or "CSV 写库失败")
+        ]
+    return updates
+
+
+# write_rag_csv_to_db_node 是 write_db_node 的别名（与 pipeline.py 节点名对齐）
+write_rag_csv_to_db_node = write_db_node
+
+
+# ── finalize_node ─────────────────────────────────────────────────────────────
+
+def finalize_node(state: PipelineState) -> dict[str, Any]:
+    """
+    流水线收尾节点：
+      1. 根据 state 推导最终 status
+      2. 写 trace/summary.json
+      3. 写 trace/timeline.md
+    """
+    run_id    = state.get("run_id", "unknown")
+    data_root = os.getenv("DATA_ROOT", "data")
+    trace_dir = state.get("trace_dir") or f"{data_root}/runs/{run_id}/trace"
+    Path(trace_dir).mkdir(parents=True, exist_ok=True)
+
+    # 推导最终状态
+    candidate_ids  = state.get("candidate_paper_ids") or []
+    pdf_path       = state.get("pdf_path")
+    dl_status      = state.get("download_status")
+    rag_csv_dir    = state.get("rag_csv_dir")
+    db_write_result = state.get("db_write_result") or {}
+
+    if not candidate_ids:
+        final_status = "no_candidates"
+    elif not pdf_path or dl_status not in ("downloaded", "already_exists"):
+        final_status = "no_pdf_downloaded"
+    elif not rag_csv_dir:
+        final_status = "extraction_failed"
+    elif db_write_result.get("status") not in (None, "ok", "skipped"):
+        final_status = "db_write_failed"
+    elif state.get("errors"):
+        final_status = "error"
+    else:
+        final_status = "success"
+
+    # summary.json
+    summary: dict[str, Any] = {
+        "run_id":           run_id,
+        "status":           final_status,
+        "profile":          state.get("extraction_profile"),
+        "template_id":      state.get("template_id"),
+        "candidate_count":  len(candidate_ids),
+        "search_summary":   state.get("search_summary"),
+        "screen_summary":   state.get("screen_summary"),
+        "extract_summary":  state.get("extract_summary"),
+        "paper_key":        state.get("paper_key"),
+        "pdf_path":         pdf_path,
+        "rag_csv_dir":      rag_csv_dir,
+        "rag_csv_files":    state.get("rag_csv_files"),
+        "biz_db_path":      state.get("biz_db_path"),
+        "db_write_result":  db_write_result,
+        "errors":           state.get("errors") or [],
+        "search_artifact_path":   state.get("search_artifact_path"),
+        "download_report_path":   state.get("download_report_path"),
+    }
+    summary_path = str(Path(trace_dir) / "summary.json")
+    Path(summary_path).write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    # timeline.md
+    timeline_path = str(Path(trace_dir) / "timeline.md")
+    lines = [
+        f"# Run {run_id} Timeline\n\n",
+        f"- **status**: `{final_status}`\n",
+        f"- **profile**: {state.get('extraction_profile', '-')}\n",
+    ]
+    if state.get("search_summary"):
+        lines.append(f"- **search**: {state['search_summary']}\n")
+    if state.get("screen_summary"):
+        lines.append(f"- **screen**: {state['screen_summary']}\n")
+    if pdf_path:
+        lines.append(f"- **pdf**: {pdf_path}\n")
+    if state.get("extract_summary"):
+        lines.append(f"- **extract**: {state['extract_summary']}\n")
+    if db_write_result:
+        lines.append(f"- **db_write**: {db_write_result.get('status', '-')}\n")
+    Path(timeline_path).write_text("".join(lines), encoding="utf-8")
+
+    return {
+        "status":        final_status,
+        "current_stage": "done",
+        "summary_path":  summary_path,
+        "timeline_path": timeline_path,
+    }
+
+
+# ── search_node ───────────────────────────────────────────────────────────────
+
 def search_node(state: PipelineState) -> dict[str, Any]:
+    """调用 SearchAgent，执行 PubMed 多轮检索并保存 artifact。"""
     agent = create_agent("search_agent", _mode(state))
     output = agent.run(
         {
-            "run_id": state.get("run_id"),
-            "query": state.get("query") or state.get("user_query"),
-            "user_query": state.get("user_query") or state.get("query"),
-            "pdf_path": state.get("pdf_path"),
-            "pdf_name": state.get("pdf_name"),
+            "run_id":                     state.get("run_id"),
+            "query":                      state.get("query") or state.get("user_query") or state.get("user_input"),
+            "user_query":                 state.get("user_query") or state.get("query") or state.get("user_input"),
+            "user_input":                 state.get("user_input") or state.get("raw_user_prompt"),
+            "refined_task_prompt":        state.get("refined_task_prompt"),
+            "refined_screening_criteria": state.get("refined_screening_criteria"),
+            "template_id":                state.get("template_id"),
         }
     )
 
-    ok = _is_ok(output)
+    ok                = _is_ok(output)
+    candidate_ids     = list(output.get("candidate_paper_ids") or [])
+    candidates        = list(output.get("candidates") or [])
+    queries           = output.get("queries") or []
+    query_strings     = [q.get("query_string", "") for q in queries if q.get("query_string")]
+
+    # 保存 search_candidates artifact
+    artifact_path = _save_artifact(
+        state.get("artifacts_dir"),
+        "search_candidates.json",
+        {
+            "queries":             queries,
+            "candidate_paper_ids": candidate_ids,
+            "candidates":          candidates,
+            "search_stats":        output.get("search_stats") or {},
+        },
+    )
+
     updates: dict[str, Any] = {
-        "current_stage": "screen",
-        "ok": ok,
-        "message": output.get("message") or output.get("search_summary") or output.get("search_agent_summary"),
-        "candidate_paper_ids": list(output.get("candidate_paper_ids") or []),
-        "candidates": list(output.get("candidates") or []),
-        "search_summary": output.get("search_summary") or output.get("search_agent_summary") or "",
+        "current_stage":      "screen",
+        "ok":                 ok,
+        "message":            output.get("message") or output.get("search_summary") or output.get("search_agent_summary"),
+        "candidate_paper_ids": candidate_ids,
+        "candidates":          candidates,
+        "queries":             queries,
+        "query_strings":       query_strings,
+        "search_summary":      output.get("search_summary") or output.get("search_agent_summary") or "",
+        "search_artifact_path": artifact_path,
     }
     if "run_metadata" in output:
         updates["run_metadata"] = output["run_metadata"]
@@ -81,26 +351,64 @@ def search_node(state: PipelineState) -> dict[str, Any]:
     return updates
 
 
+# ── screen_node ───────────────────────────────────────────────────────────────
+
 def screen_node(state: PipelineState) -> dict[str, Any]:
+    """调用 ScreenAgent，执行相关性筛选 + PDF 下载，并保存 artifact。"""
     agent = create_agent("screen_agent", _mode(state))
     output = agent.run(
         {
-            "run_id": state.get("run_id"),
-            "query": state.get("query") or state.get("user_query"),
-            "candidate_paper_ids": state.get("candidate_paper_ids") or [],
-            "candidates": state.get("candidates") or [],
-            "search_summary": state.get("search_summary"),
+            "run_id":                     state.get("run_id"),
+            "query":                      state.get("query") or state.get("user_query"),
+            "candidate_paper_ids":        state.get("candidate_paper_ids") or [],
+            "candidates":                 state.get("candidates") or [],
+            "search_summary":             state.get("search_summary"),
+            "refined_screening_criteria": state.get("refined_screening_criteria"),
+            "extraction_profile":         state.get("extraction_profile"),
+            "template_id":                state.get("template_id"),
         }
     )
 
-    ok = _is_ok(output)
+    ok               = _is_ok(output)
+    download_results = output.get("download_results") or []
+
+    # 从 download_results 提取第一个成功 PDF
+    successful = [
+        r for r in download_results
+        if r.get("download_status") in ("downloaded", "already_exists")
+    ]
+    first = successful[0] if successful else None
+
+    paper_key     = output.get("paper_key")     or (first.get("paper_key")     if first else None)
+    pdf_path      = output.get("pdf_path")      or (first.get("pdf_path")      if first else None)
+    dl_status     = output.get("download_status") or (first.get("download_status") if first else "failed")
+    file_sha256   = output.get("file_sha256")   or (first.get("file_sha256")   if first else None)
+
+    # 保存 download_report artifact
+    download_report_path = _save_artifact(
+        state.get("artifacts_dir"),
+        "download_report.json",
+        {
+            "download_results": download_results,
+            "paper_key":        paper_key,
+            "pdf_path":         pdf_path,
+            "download_status":  dl_status,
+        },
+    )
+
     updates: dict[str, Any] = {
-        "current_stage": "extract",
-        "ok": ok,
-        "message": output.get("message") or output.get("screen_summary") or output.get("screen_agent_summary"),
-        "screened_paper_ids": list(output.get("screened_paper_ids") or []),
-        "selected_paper": output.get("selected_paper"),
-        "screen_summary": output.get("screen_summary") or output.get("screen_agent_summary") or "",
+        "current_stage":       "extract",
+        "ok":                  ok,
+        "message":             output.get("message") or output.get("screen_summary") or output.get("screen_agent_summary"),
+        "screened_paper_ids":  list(output.get("screened_paper_ids") or []),
+        "selected_paper":      output.get("selected_paper"),
+        "screen_summary":      output.get("screen_summary") or output.get("screen_agent_summary") or "",
+        "paper_key":           paper_key,
+        "pdf_path":            pdf_path,
+        "download_status":     dl_status,
+        "file_sha256":         file_sha256,
+        "download_results":    download_results,
+        "download_report_path": download_report_path,
     }
     if "run_metadata" in output:
         updates["run_metadata"] = output["run_metadata"]
@@ -112,29 +420,56 @@ def screen_node(state: PipelineState) -> dict[str, Any]:
     return updates
 
 
+# ── extract_node ──────────────────────────────────────────────────────────────
+
 def extract_node(state: PipelineState) -> dict[str, Any]:
+    """调用 ExtractAgent，执行 RAG CSV 生成。"""
+    paper_key          = state.get("paper_key")
+    extraction_profile = state.get("extraction_profile") or os.getenv("EXTRACTION_PROFILE", "hap_peptide_v1")
+    template_id        = state.get("template_id") or extraction_profile
+    pdf_path           = state.get("pdf_path")
+
+    # 构造 output_dir
+    data_root  = os.getenv("DATA_ROOT", "data")
+    output_dir = f"{data_root}/projects/{extraction_profile}/papers/{paper_key or 'unknown'}/outputs/rag_csv"
+
     agent = create_agent("extract_agent", _mode(state))
     output = agent.run(
         {
-            "run_id": state.get("run_id"),
-            "pdf_path": state.get("pdf_path"),
-            "pdf_name": state.get("pdf_name"),
-            "screened_paper_ids": state.get("screened_paper_ids") or [],
-            "selected_paper": state.get("selected_paper"),
-            "screen_summary": state.get("screen_summary"),
+            "run_id":                 state.get("run_id"),
+            "pdf_path":               pdf_path,
+            "pdf_name":               state.get("pdf_name"),
+            "paper_key":              paper_key,
+            "extraction_profile":     extraction_profile,
+            "template_id":            template_id,
+            "output_dir":             output_dir,
+            "schema_template_path":   state.get("schema_template_path"),
+            "rag_extraction_contract": state.get("rag_extraction_contract"),
+            "screened_paper_ids":     state.get("screened_paper_ids") or [],
+            "selected_paper":         state.get("selected_paper"),
+            "screen_summary":         state.get("screen_summary"),
         }
     )
 
-    ok = _is_ok(output)
-    extraction = output.get("extraction")
+    ok          = _is_ok(output)
+    rag_csv_dir = output.get("rag_csv_dir") or output.get("output_dir")
+    rag_csv_files = output.get("rag_csv_files") or output.get("csv_files")
+
     updates: dict[str, Any] = {
-        "current_stage": "done" if ok else "error",
-        "ok": ok,
-        "message": output.get("message") or output.get("extract_summary") or output.get("extract_agent_summary"),
+        "current_stage":        "done" if ok else "error",
+        "ok":                   ok,
+        "message":              output.get("message") or output.get("extract_summary") or output.get("extract_agent_summary"),
         "extracted_record_ids": list(output.get("extracted_record_ids") or []),
-        "extract_summary": output.get("extract_summary") or output.get("extract_agent_summary") or "",
-        "extraction": extraction,
-        "result": extraction if ok else None,
+        "extract_summary":      output.get("extract_summary") or output.get("extract_agent_summary") or "",
+        "extraction":           output.get("extraction"),
+        "result":               output.get("extraction") if ok else None,
+        "rag_csv_dir":          rag_csv_dir,
+        "rag_csv_files":        rag_csv_files,
+        "ragflow_ref":          output.get("ragflow_ref"),
+        "csv_quality_status":   output.get("csv_quality_status") or (
+            "pass" if ok and rag_csv_files else "unknown"
+        ),
+        "csv_quality_issues":   output.get("csv_quality_issues") or [],
     }
     if "run_metadata" in output:
         updates["run_metadata"] = output["run_metadata"]
@@ -145,4 +480,14 @@ def extract_node(state: PipelineState) -> dict[str, Any]:
     return updates
 
 
-__all__ = ["extract_node", "screen_node", "search_node"]
+__all__ = [
+    "extract_node",
+    "finalize_node",
+    "guide_node",
+    "init_db_node",
+    "prepare_extraction_context_node",
+    "screen_node",
+    "search_node",
+    "write_db_node",
+    "write_rag_csv_to_db_node",
+]

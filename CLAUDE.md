@@ -54,16 +54,35 @@ backend/src/
 │   ├── extract_agent/       ← ExtractAgent（旧 MVP，原样不动）
 │   └── _template/           ← 新 agent 的骨架模具
 ├── tools/
-│   └── registry.py          ← get_tools(names) 工具注册表
+│   ├── registry.py          ← get_tools(names) 工具注册表（懒加载，ImportError 降级为 stub）
+│   ├── search/              ← PubMed 检索工具
+│   │   ├── __init__.py
+│   │   └── pubmed_search.py ← pubmed_search()，Biopython Entrez，多批次 efetch，0.35s 节流
+│   └── rag_paper/           ← RAG 端到端抽取工具（一键 PDF → 五表 CSV）
+│       ├── __init__.py
+│       ├── schemas.py        ← RunBioPaperPipelineInput / ParsePDFInput / RetrieveEvidenceInput
+│       ├── service_factory.py ← get_rag_service() 单例工厂
+│       ├── tools.py          ← @tool 包装（run_bio_paper_extraction_pipeline / parse_pdf_with_ragflow / retrieve_pdf_evidence）
+│       ├── template_contract.py ← load_extraction_contract()（委托 db_access.reader，回退 YAML）
+│       ├── normalizer.py     ← normalize_to_five_tables()（枚举归一化 + 稳定 ID sha256[:12]）
+│       └── csv_writer.py     ← write_tables_to_csv()（overwrite=False → 跳过已有文件）
 ├── graph/
-│   ├── state.py             ← PipelineState TypedDict（+ guide_agent 字段）
-│   ├── pipeline.py          ← build_graph()，StateGraph（guide→search→screen→extract）
-│   ├── factory.py           ← _AGENTS dict，get_agent()
-│   └── nodes.py             ← guide_node / search_node / screen_node / extract_node
-├── cli/                     ← 对话式 CLI（Step 08-09 完成）
+│   ├── state.py             ← PipelineState TypedDict（+ guide / file_asset / DB / finalize 字段）
+│   ├── pipeline.py          ← build_graph()，StateGraph 7 节点：
+│   │                            START→guide→search→screen→prepare_extraction_context
+│   │                                →extract→write_rag_csv_to_db→finalize→END
+│   │                            条件边：search/screen/extract 均可短路到 finalize
+│   ├── factory.py           ← _AGENTS dict，create_agent()；_wrap_screen() demo/real 使用真实 AgentTemplate
+│   └── nodes.py             ← guide_node / search_node / screen_node /
+│                                prepare_extraction_context_node / extract_node /
+│                                write_db_node / finalize_node（+ init_db_node 向后兼容保留）
+├── cli/                     ← CLI 入口集合
 │   ├── __init__.py          ← 导出 main()
 │   ├── __main__.py          ← 入口点（python -m backend.src.cli [--check-only]）
-│   ├── app.py               ← 10 步编排流程：
+│   ├── run_demo_pipeline.py ← 非交互式 Demo 入口（自动确认 Guide interrupt）：
+│   │                            python -m backend.src.cli.run_demo_pipeline \
+│   │                              --profile hap_peptide_v1 --mode demo
+│   ├── app.py               ← 10 步编排流程（交互式）：
 │   │                            1-2. system_check + banner 显示
 │   │                            3. 初始化 CLISession
 │   │                            4-6. 三步 interrupt 对话
@@ -85,7 +104,12 @@ backend/src/
 └── db_access/
     ├── trace/               ← Trace 数据库（hooks.py 替代旧 trace_logger.py）
     ├── memory/              ← 内存数据库（v0.1 TODO）
-    └── business/            ← 业务数据库（旧 MVP，原样不动）
+    └── business/            ← 业务 SQLite 接口层
+        ├── __init__.py      ← 导出三类操作（ensure_business_db / get_rag_extraction_contract / write_rag_csv_to_business_db）
+        ├── schemas.py       ← Pydantic 数据契约（DbInitResult / CsvWriteResult / RagExtractionContract / PaperContext）
+        ├── init_service.py  ← ensure_business_db()（路径推导 + 委托 db/business/sqlite_init.py）
+        ├── reader.py        ← get_rag_extraction_contract() / get_paper_context()
+        └── csv_writer.py    ← write_rag_csv_to_business_db()（overwrite=False → INSERT OR IGNORE；True → INSERT OR REPLACE）
 ```
 
 ## 起新 Agent 的步骤
@@ -132,34 +156,41 @@ cd backend && python -m pytest tests/test_agent_template.py -v
 
 ## Environment Variables（.env）
 
+完整示例见 `.env.example`，以下列出关键变量：
+
 ```env
 # ── LLM 配置 ──────────────────────────────────────────────────────────────
-# 填写实际使用的供应商 key，LiteLLM 自动识别
-OPENAI_API_KEY=sk_...
-# MINIMAX_API_KEY=your_key_here
-# ANTHROPIC_API_KEY=...
+LLM_API_KEY=your-llm-api-key
+LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3
+LLM_MODEL=ark-code-latest
 
-# 可选：默认模型（供脚本和 CLI 使用）
-DEFAULT_LLM_MODEL=openai/gpt-4o
+# ── 运行模式 ──────────────────────────────────────────────────────────────
+# demo：guide/search/screen/extract 全部真实 LLM；extract 使用 mock（无 RAGFlow）
+# real：全链路真实
+GRAPH_AGENT_MODE=demo
 
-# ── LangGraph 检查点数据库 ───────────────────────────────────────────────
-# 用于 interrupt/resume 支持（与 trace 库分离）
+# ── 业务数据库（SQLite demo 用）────────────────────────────────────────────
+BIZ_DB_PATH=/app/data/hap_v01.db
+BIZ_DB_BACKEND=sqlite          # sqlite | postgresql（未来扩展）
+
+# ── 提取配置（schema 模板）────────────────────────────────────────────────
+EXTRACTION_PROFILE=hap_peptide_v1
+TEMPLATE_VERSION=v1
+SCHEMA_TEMPLATE_PATH=           # 显式指定时覆盖自动推导路径
+
+# ── 数据目录 ──────────────────────────────────────────────────────────────
+DATA_ROOT=/app/data             # 容器内路径；宿主机通过 volume 映射
+
+# ── NCBI（PubMed 检索）────────────────────────────────────────────────────
+NCBI_EMAIL=your@email.com       # 必填；NCBI 用于联系滥用者
+NCBI_API_KEY=                   # 可选；有 key 时速率提升 10 req/s
+
+# ── RAGFlow（视觉 PDF 解析）────────────────────────────────────────────────
+RAGFLOW_API_BASE_URL=https://your-ragflow-host
+RAGFLOW_API_KEY=ragflow-xxxxx
+
+# ── LangGraph 检查点 ──────────────────────────────────────────────────────
 LANGGRAPH_CHECKPOINT_DB_URL=sqlite:///./data/demo_checkpoint.db
-# LANGGRAPH_CHECKPOINT_DB_URL=postgresql://bioforge:pass@localhost/bioforge
-
-# ── 业务数据库 ──────────────────────────────────────────────────────────
-DATABASE_URL=postgresql://bioforge:pass@localhost/bioforge
-BIZ_DB_PATH=./data/hap_v01.db  # SQLite 备选
-
-# ── Trace 数据库 ────────────────────────────────────────────────────────
-TRACE_DB_URL=sqlite:///./data/hap_trace.db
-
-# ── CLI 配置 ─────────────────────────────────────────────────────────────
-# Guide Agent 运行模式：mock（固定输出）/ real（真实 LLM 调用）
-GRAPH_AGENT_MODE=mock
-
-# ── 其他 ────────────────────────────────────────────────────────────────
-PYTHONUNBUFFERED=1  # 日志实时刷新
 ```
 
 ## Running CLI

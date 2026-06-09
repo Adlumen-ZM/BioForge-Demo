@@ -28,12 +28,6 @@ def create_extract_agent(model: str = None) -> AgentTemplate:
         agent = create_extract_agent()
         result = agent.run(pipeline_state={"paper_texts": [...]})
 
-    Note:
-        RAG 功能当前已禁用，等待 FlagEmbedding 依赖安装后启用。
-        启用方式：
-        1. 安装依赖: pip install FlagEmbedding
-        2. 取消 plan.yaml 中 RAG 步骤的注释
-        3. 取消下方 tools 参数的注释
     """
     model = model or os.getenv("DEFAULT_LLM_MODEL", "deepseek/deepseek-chat")
     config = AgentTemplateConfig(
@@ -43,9 +37,7 @@ def create_extract_agent(model: str = None) -> AgentTemplate:
         skills_dir=_AGENT_DIR / "skills",
         model=model,
         tools=[
-            "chunk_document",
-            "build_rag_index",
-            "retrieve_chunks",
+            "run_bio_paper_extraction_pipeline",
         ],
         max_step_retries=2,
         enable_trace=True,

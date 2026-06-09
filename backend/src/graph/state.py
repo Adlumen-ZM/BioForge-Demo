@@ -139,6 +139,31 @@ class PipelineState(TypedDict, total=False):
     csv_quality_issues: list[dict] | None
     """CSV 质量问题列表（[{field, issue, severity}]）。"""
 
+    # ── 业务数据库初始化（v0.1）──────────────────────────────────────────
+    extraction_profile: str | None
+    """提取配置名，决定数据库路径分层（默认与 template_id 相同）。"""
+
+    template_id: str | None
+    """schema 模板 ID（如 hap_peptide_v1），供 init_db_node 和 write_db_node 读取。"""
+
+    biz_db_path: str | None
+    """业务 SQLite 数据库绝对路径，由 init_db_node 写入。"""
+
+    biz_db_init_result: dict | None
+    """数据库初始化结果（{status, tables_created, vocab_count, already_existed}）。"""
+
+    # ── Search 多轮检索式（v0.1）─────────────────────────────────────────
+    queries: list[dict] | None
+    """Search Agent 构建的多条检索式（[{query_id, query_string, purpose}]）。"""
+
+    # ── Screen 下载批结果（v0.1）──────────────────────────────────────────
+    download_results: list[dict] | None
+    """Screen Agent 每篇文献的下载结果列表（[{pmid, doi, paper_key, pdf_path, download_status}]）。"""
+
+    # ── 模板路径（v0.1）──────────────────────────────────────────────────
+    schema_template_path: str | None
+    """schema.yaml 文件绝对路径，供 extract_agent 和 RAG 工具读取。"""
+
     # ── 写库阶段（v0.1 预留）─────────────────────────────────────────────
     extraction_package_path: str | None
     """打包后的 extraction JSON 路径（含 entities + metadata）。"""
@@ -152,6 +177,50 @@ class PipelineState(TypedDict, total=False):
     # ── 通用元数据 ────────────────────────────────────────────────────────
     run_metadata: dict[str, Any]
     """最后一次 agent run 的元数据，主要用于调试和日志关联。"""
+
+    # ── 新增：流水线最终状态 ──────────────────────────────────────────────
+    status: str | None
+    """流水线最终状态（由 finalize_node 写入）：
+    success / no_candidates / no_pdf_downloaded / extraction_failed / db_write_failed / error。"""
+
+    # ── 新增：运行时目录（由 _with_defaults 注入）────────────────────────
+    trace_dir: str | None
+    """trace 文件目录：data/runs/{run_id}/trace。"""
+
+    artifacts_dir: str | None
+    """artifact 文件目录：data/runs/{run_id}/artifacts。"""
+
+    # ── 新增：finalize_node 输出路径 ─────────────────────────────────────
+    summary_path: str | None
+    """流水线摘要 JSON 路径：data/runs/{run_id}/trace/summary.json。"""
+
+    timeline_path: str | None
+    """流水线时间线 Markdown 路径：data/runs/{run_id}/trace/timeline.md。"""
+
+    # ── 新增：search_node 扩展输出 ───────────────────────────────────────
+    query_strings: list[str] | None
+    """检索式扁平列表（从 queries 中提取 query_string 字段），供 trace/CLI 展示。"""
+
+    search_artifact_path: str | None
+    """search_candidates.json artifact 路径：data/runs/{run_id}/artifacts/search_candidates.json。"""
+
+    # ── 新增：screen_node 扩展输出 ───────────────────────────────────────
+    download_report_path: str | None
+    """下载报告 artifact 路径：data/runs/{run_id}/artifacts/download_report.json。"""
+
+    # ── 新增：prepare_extraction_context_node 输出 ───────────────────────
+    rag_extraction_contract: dict | None
+    """RAG 抽取合约（get_rag_extraction_contract() 返回值），包含 csv_tables/enum_groups。"""
+
+    field_mapping_path: str | None
+    """field_mapping.yaml 文件路径，供 RAG 工具按需读取。"""
+
+    # ── 新增：版本与用户输入 ──────────────────────────────────────────────
+    template_version: str | None
+    """schema 模板版本（如 "v1"），由 guide_agent 或 CLI 入口写入。"""
+
+    user_input: str | None
+    """用户原始输入（run_demo_pipeline --topic 参数），与 user_query 等价，供 search_node 读取。"""
 
 
 GraphState = PipelineState

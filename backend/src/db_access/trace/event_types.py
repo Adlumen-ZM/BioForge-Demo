@@ -37,21 +37,32 @@ class TraceEventType:
 
     # ── Guide 级（CLI 不显示，已由 interrupt 流处理）────────────────────────
     GUIDE_STARTED          = "guide_started"
+    GUIDE_FINISHED         = "guide_finished"
+    GUIDE_TASK_REFINED     = "guide_task_refined"
     GUIDE_LLM_CALLED       = "guide_llm_called"
     GUIDE_STEP_CONFIRMED   = "guide_step_confirmed"
     GUIDE_OUTPUT_READY     = "guide_output_ready"
 
     # ── Search 业务事件 ───────────────────────────────────────────────────────
+    SEARCH_STARTED            = "search_started"
     SEARCH_QUERY_BUILT        = "search_query_built"
     SEARCH_TOOL_CALLED        = "search_tool_called"
     SEARCH_RESULTS_COLLECTED  = "search_results_collected"
     SEARCH_CANDIDATES_SAVED   = "search_candidates_saved"
+    SEARCH_FINISHED           = "search_finished"
 
     # ── Screen / Download 业务事件 ────────────────────────────────────────────
+    SCREEN_STARTED            = "screen_started"
     SCREEN_DECISION_MADE      = "screen_decision_made"
+    SCREEN_REPORT_SAVED       = "screen_report_saved"
     DOWNLOAD_ATTEMPT_STARTED  = "download_attempt_started"
     PDF_DOWNLOAD_FINISHED     = "pdf_download_finished"
     DOWNLOAD_REPORT_SAVED     = "download_report_saved"
+    SCREEN_FINISHED           = "screen_finished"
+
+    # ── Extraction 准备阶段事件 ────────────────────────────────────────────────
+    BUSINESS_DB_INITIALIZED         = "business_db_initialized"
+    RAG_EXTRACTION_CONTRACT_LOADED  = "rag_extraction_contract_loaded"
 
     # ── Extract / RAG 业务事件 ────────────────────────────────────────────────
     RAG_EXTRACTION_STARTED    = "rag_extraction_started"
@@ -60,11 +71,14 @@ class TraceEventType:
     CSV_QUALITY_CHECKED       = "csv_quality_checked"
     EXTRACTION_PACKAGE_BUILT  = "extraction_package_built"
     VALIDATION_REPORT_SAVED   = "validation_report_saved"
+    EXTRACT_FINISHED          = "extract_finished"
 
     # ── Persist 业务事件 ──────────────────────────────────────────────────────
-    DB_PERSIST_STARTED  = "db_persist_started"
-    DB_PERSIST_FINISHED = "db_persist_finished"
-    DB_PERSIST_FAILED   = "db_persist_failed"
+    RAG_CSV_WRITE_STARTED  = "rag_csv_write_started"
+    RAG_CSV_WRITTEN_TO_DB  = "rag_csv_written_to_db"
+    DB_PERSIST_STARTED     = "db_persist_started"
+    DB_PERSIST_FINISHED    = "db_persist_finished"
+    DB_PERSIST_FAILED      = "db_persist_failed"
 
     # ── LLM 调用事件 ──────────────────────────────────────────────────────────
     LLM_CALL_STARTED           = "llm_call_started"
@@ -98,12 +112,27 @@ CLI_NORMAL_EVENTS = frozenset({
     TraceEventType.PIPELINE_FAILED,
     TraceEventType.NODE_STARTED,
     TraceEventType.NODE_FINISHED,
+    # Search
+    TraceEventType.SEARCH_STARTED,
     TraceEventType.SEARCH_QUERY_BUILT,
     TraceEventType.SEARCH_RESULTS_COLLECTED,
+    TraceEventType.SEARCH_CANDIDATES_SAVED,
+    TraceEventType.SEARCH_FINISHED,
+    # Screen
+    TraceEventType.SCREEN_STARTED,
+    TraceEventType.SCREEN_DECISION_MADE,
     TraceEventType.PDF_DOWNLOAD_FINISHED,
+    TraceEventType.DOWNLOAD_REPORT_SAVED,
+    TraceEventType.SCREEN_FINISHED,
+    # Extraction
+    TraceEventType.BUSINESS_DB_INITIALIZED,
+    TraceEventType.RAG_EXTRACTION_CONTRACT_LOADED,
     TraceEventType.RAG_CSV_GENERATED,
     TraceEventType.CSV_QUALITY_CHECKED,
-    TraceEventType.EXTRACTION_PACKAGE_BUILT,
+    TraceEventType.EXTRACT_FINISHED,
+    # Persist
+    TraceEventType.RAG_CSV_WRITE_STARTED,
+    TraceEventType.RAG_CSV_WRITTEN_TO_DB,
     TraceEventType.DB_PERSIST_FINISHED,
 })
 

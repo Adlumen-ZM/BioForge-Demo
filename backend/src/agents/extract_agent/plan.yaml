@@ -1,210 +1,95 @@
-﻿# extract_agent/plan.yaml
-# ExtractAgent 的预定义 plan，多阶段抽取流程（集成 RAG）。
-# plan_runner 按顺序执行，replanner 可在运行时修改内存中的 plan 对象（不回写此文件）。
+# extract_agent/plan.yaml
+# ExtractAgent 的预定义 plan — RAG CSV 抽取工具调用器
+# 不直接写数据库；五表 CSV 输出由 write_rag_csv_to_db_node 写入。
 
-plan_id: "extract_plan_v02"
+plan_id: "extract_plan_rag_csv_v1"
 agent_name: "extract_agent"
-version: "1.0"
+version: "2.0"
 
 steps:
-  - step_id: "chunk_documents"
-    name: "文档切块"
+  - step_id: "run_rag_csv_pipeline"
+    name: "调用 RAG 端到端抽取工具"
     instruction: |
-      任务：调用 chunk_document 工具解析 PDF 文档。
+      调用 run_bio_paper_extraction_pipeline 工具执行完整抽取。
 
-      输入：
-        - pdf_path：从 upstream_context 中获取 PDF 文件路径
+      输入（从 upstream_context 获取）：
+        - pdf_path：PDF 文件绝对路径
+        - output_dir：CSV 输出目录（格式：
+            data/projects/{extraction_profile}/papers/{paper_key}/outputs/rag_csv）
+        - template_id：固定传入 "hap_peptide_v1"
+        - overwrite：默认 false
 
-      执行步骤：
-        1. 从输入中提取 pdf_path 值
-        2. 调用 chunk_document 工具：chunk_document(pdf_path="<路径>")
-        3. 将工具返回的 JSON 结果原样作为最终回答
+      如果 upstream_context 中没有 paper_key 或 extraction_profile，
+      使用如下兜底构造：
+        output_dir = data/projects/hap_peptide_v1/papers/unknown/outputs/rag_csv
 
-      最终回答必须是严格的 JSON 格式，不能包含任何额外文字：
+      工具将自动完成：
+        RAGFlow 视觉解析 → BGE-M3 混合检索 → LLM 字段抽取 →
+        枚举归一化 → 五表 CSV 写出
+
+      最终回答必须是严格的 JSON 格式：
       {
-        "status": "success" | "error",
-        "chunks": [
-          {
-            "chunk_id": "<唯一标识>",
-            "text": "<块文本内容>",
-            "type": "text" | "table" | "abstract",
-            "is_abstract": true | false
-          }
-        ],
-        "chunk_count": <int>,
+        "status": "ok" | "error",
+        "output_dir": "<CSV 输出目录路径>",
+        "csv_files": {
+          "paper": "<path>",
+          "paper_entity_record": "<path>",
+          "entity_component": "<path>",
+          "record_function": "<path>",
+          "function_assay_evidence": "<path>"
+        },
+        "tables": {
+          "paper": {"rows": <int>},
+          "paper_entity_record": {"rows": <int>},
+          "entity_component": {"rows": <int>},
+          "record_function": {"rows": <int>},
+          "function_assay_evidence": {"rows": <int>}
+        },
         "error": "<错误信息或 null>"
       }
     tools_required:
-      - "chunk_document"
+      - "run_bio_paper_extraction_pipeline"
     success_criteria:
       required_fields:
         - "status"
-        - "chunks"
-      min_count:
-        chunks: 1
-    max_retries: 1
-    db_write_policy: "none"
-
-  - step_id: "embed_and_index"
-    name: "Embedding 与建索引"
-    instruction: |
-      任务：调用 build_rag_index 工具为文档 chunks 建立向量索引。
-
-      输入：
-        - 上一步 chunk_documents 输出的 chunks
-
-      执行步骤：
-        1. 从上一步输出中提取 chunks 数组
-        2. 调用 build_rag_index 工具：build_rag_index(chunks=<chunks数组>)
-        3. 将工具返回的 JSON 结果原样作为最终回答
-
-      最终回答必须是严格的 JSON 格式，不能包含任何额外文字：
-      {
-        "status": "success" | "error",
-        "indexed_count": <int>,
-        "error": "<错误信息或 null>"
-      }
-    tools_required:
-      - "build_rag_index"
-    success_criteria:
-      required_fields:
-        - "status"
-        - "indexed_count"
+        - "output_dir"
+        - "csv_files"
       min_count: {}
     max_retries: 1
     db_write_policy: "none"
 
-  - step_id: "retrieve_context"
-    name: "RAG 召回与上下文回填"
+  - step_id: "check_csv_output"
+    name: "检查 RAG CSV 输出完整性"
     instruction: |
-      任务：调用 retrieve_chunks 工具从已建索引中召回相关内容。
+      检查上一步 run_rag_csv_pipeline 的输出，确认五张 CSV 全部存在。
 
-      输入：
-        - research_objective：研究目标（如 "FAE 肽段与 HAp 的吸附机制"）
-        - 上一步建立的索引（已在全局状态中）
+      检查项：
+        1. status 是否为 "ok"
+        2. csv_files 是否包含以下五张表的路径：
+           paper、paper_entity_record、entity_component、
+           record_function、function_assay_evidence
+        3. 各表 rows 数量（为 0 不算失败，记录在摘要中）
 
-      执行步骤：
-        1. 从输入中提取 research_objective
-        2. 基于 research_objective 构造 1-2 个相关的英文检索 query
-        3. 调用 retrieve_chunks 工具：retrieve_chunks(query="<英文query>", top_k=5)
-        4. 将工具返回的 JSON 结果原样作为最终回答
+      不写数据库，不修改 CSV。
 
-      最终回答必须是严格的 JSON 格式，不能包含任何额外文字：
+      最终回答必须是严格的 JSON 格式：
       {
-        "status": "success" | "error",
-        "query": "<检索 query>",
-        "retrieved_chunks": [
-          {
-            "chunk_id": "<源区块 ID>",
-            "text": "<块文本内容>",
-            "score": <相关性分数>
-          }
-        ],
-        "retrieved_count": <int>,
-        "context_summary": "<完整上下文字符串>",
-        "error": "<错误信息或 null>"
+        "csv_files": <从上一步透传>,
+        "tables_summary": {
+          "paper": <rows>,
+          "paper_entity_record": <rows>,
+          "entity_component": <rows>,
+          "record_function": <rows>,
+          "function_assay_evidence": <rows>
+        },
+        "all_tables_present": true | false,
+        "extract_summary": "<一句话摘要：几张表、共几行数据>"
       }
-
-      注意：context_summary 将作为下一步 LLM 信息抽取的上下文输入。
-    tools_required:
-      - "retrieve_chunks"
-    success_criteria:
-      required_fields:
-        - "status"
-        - "context_summary"
-      min_count: {}
-    max_retries: 1
-    db_write_policy: "none"
-
-  - step_id: "llm_extract"
-    name: "LLM 信息抽取"
-    instruction: |
-      任务：根据 RAG 召回的上下文，提取论文的结构化信息。
-
-      输入数据（来自上一步 retrieve_context 的 context_summary）：
-        - context_summary：RAG 召回的相关片段汇总
-
-      抽取要求：
-        1. 提取论文元数据：DOI、标题、作者、期刊、发表年份
-        2. 识别并提取所有 FAE 肽段：
-           - 肽段序列（氨基酸缩写，如 "AKKARA"）
-           - 序列长度
-           - 所在的蛋白质来源
-           - 与矿物（HAp/磷酸钙）的相互作用描述
-        3. 提取实验方法：合成方法、表征技术、生物活性测试等
-        4. 提取结论：生物矿化机制、结论、创新点
-
-      输出 JSON 格式（用 ```json``` 代码块包裹）：
-      ```json
-      {
-        "papers": [
-          {
-            "paper_id": "paper_0",
-            "doi": null,
-            "title": "<论文标题>",
-            "authors": ["<作者1>", "<作者2>"],
-            "journal": "<期刊名或 null>",
-            "year": <年份或 null>,
-            "fae_records": [
-              {
-                "sequence": "<肽段序列>",
-                "length": <氨基酸数量>,
-                "source_protein": "<来源蛋白质或 null>",
-                "mineral_type": "<矿物类型：HAp/磷酸钙/其他>",
-                "interaction_description": "<相互作用描述>",
-                "bioactivity": "<生物活性描述或 null>"
-              }
-            ],
-            "methods": ["<方法1>", "<方法2>"],
-            "conclusions": "<主要结论或 null>"
-          }
-        ],
-        "extraction_stats": {
-          "papers_processed": 1,
-          "papers_succeeded": 1,
-          "papers_failed": 0
-        }
-      }
-      ```
-
-      重要提示：
-        - 无法确定的字段用 null
-        - 必须用英文双引号包裹字符串
-        - 整数类型的 year、length、papers_processed 等不加引号
     tools_required: []
     success_criteria:
       required_fields:
-        - "papers"
-      min_count:
-        papers: 1
-    max_retries: 2
-    db_write_policy: "none"
-
-  - step_id: "validate_output"
-    name: "输出格式校验"
-    instruction: |
-      任务：对上一步 LLM 抽取的输出进行格式和内容校验。
-
-      校验规则：
-        1. JSON 格式校验：确保可解析
-        2. 必填字段校验：papers 数组必须存在，每篇论文必须有 title 和 fae_records
-        3. 每个 fae_record 必须有 sequence 和 interaction_description
-        4. 统计成功/失败论文数
-
-      输出 JSON 格式（用 ```json``` 代码块包裹）：
-      ```json
-      {
-        "validation_result": "pass" | "partial" | "fail",
-        "valid_papers": [0],
-        "invalid_papers": [],
-        "summary": "<校验总结，说明通过或失败的原因>"
-      }
-      ```
-    tools_required: []
-    success_criteria:
-      required_fields:
-        - "validation_result"
-        - "valid_papers"
+        - "csv_files"
+        - "extract_summary"
       min_count: {}
     max_retries: 1
     db_write_policy: "none"

@@ -25,6 +25,26 @@ class RunBioPaperPipelineInput(BaseModel):
             "文件必须存在且可读，否则抛出 FileNotFoundError。"
         ),
     )
+    output_dir: str = Field(
+        ...,
+        description=(
+            "CSV 输出目录的绝对路径（不存在时自动创建）。"
+            "例如：/app/data/projects/hap_peptide_v1/papers/{paper_key}/outputs/rag_csv。"
+            "五张 CSV 文件将写入此目录。"
+        ),
+    )
+    template_id: str = Field(
+        default="hap_peptide_v1",
+        description="schema 模板 ID，决定 CSV 字段结构。当前固定为 hap_peptide_v1。",
+    )
+    schema_template_path: str | None = Field(
+        default=None,
+        description="schema.yaml 的显式路径；None 时根据 template_id 自动推导。",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="False 时若 CSV 文件已存在则跳过（幂等）；True 时强制覆盖。",
+    )
 
 
 class ParsePDFInput(BaseModel):

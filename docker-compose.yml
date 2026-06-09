@@ -13,7 +13,9 @@ services:
 
     environment:
       - PYTHONUNBUFFERED=1
-      - BIZ_DB_PATH=/app/data/hap_v01.db
+      - DATA_ROOT=/app/data
+      - EXTRACTION_PROFILE=hap_peptide_v1
+      - BIZ_DB_PATH=/app/data/projects/hap_peptide_v1/db/business.sqlite
       - TRACE_DB_PATH=/app/data/hap_trace.db
       - GRAPH_AGENT_MODE=demo
 

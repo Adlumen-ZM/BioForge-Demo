@@ -141,32 +141,80 @@ class BioPaperRAGService:
     # 公开接口
     # ------------------------------------------------------------------
 
-    def run_pipeline(self, pdf_path: str) -> dict[str, Any]:
+    def run_pipeline(
+        self,
+        pdf_path: str,
+        output_dir: str | None = None,
+        template_id: str = "hap_peptide_v1",
+        schema_template_path: str | None = None,
+        overwrite: bool = False,
+        paper_key: str | None = None,
+    ) -> dict[str, Any]:
         """
-        端到端结构化抽取：解析 -> 盲盒发现 -> 检索 -> 字段抽取。
+        端到端结构化抽取：解析 → 盲盒发现 → 检索 → 字段抽取 → 五表 CSV 写出。
 
         Parameters
         ----------
         pdf_path : str
-            本地 PDF 文件的绝对路径
+            本地 PDF 文件的绝对路径。
+        output_dir : str | None
+            CSV 输出目录；None 时只返回 paper_meta + entities，不写 CSV。
+        template_id : str
+            schema 模板 ID（默认 hap_peptide_v1），用于加载 CSV 字段合约。
+        schema_template_path : str | None
+            schema.yaml 显式路径；None 时根据 template_id 自动推导。
+        overwrite : bool
+            True 时覆盖已有 CSV 文件。
+        paper_key : str | None
+            文献 paper_key，用于生成稳定实体 ID。
 
         Returns
         -------
         dict
-            - status      : "ok" | "error"
-            - pdf_path    : 输入的 PDF 路径
-            - paper_meta  : 论文元数据（标题、作者、DOI 等）
-            - entities    : 结构化实体列表（肽段、HAp 颗粒等）
+            - status     : "ok" | "error"
+            - pdf_path   : 输入路径
+            - paper_meta : 论文元数据
+            - entities   : 原始实体列表
+            - output_dir : CSV 输出目录（仅当 output_dir 不为 None 时存在）
+            - csv_files  : {table_name: path}（同上）
+            - tables     : {table_name: {rows: n}}（同上）
         """
         try:
             orchestrator = self._get_orchestrator()
             raw = orchestrator.process_pdf(pdf_path)
-            return {
-                "status": "ok",
-                "pdf_path": pdf_path,
+
+            result: dict[str, Any] = {
+                "status":     "ok",
+                "pdf_path":   pdf_path,
                 "paper_meta": raw.get("paper_meta", {}),
-                "entities": raw.get("entities", []),
+                "entities":   raw.get("entities", []),
             }
+
+            if output_dir is not None:
+                # 加载 CSV 字段合约
+                from backend.src.tools.rag_paper.template_contract import load_extraction_contract
+                from backend.src.tools.rag_paper.normalizer import normalize_to_five_tables
+                from backend.src.tools.rag_paper.csv_writer import write_tables_to_csv
+
+                contract = load_extraction_contract(
+                    template_id=template_id,
+                    schema_template_path=schema_template_path,
+                )
+                tables = normalize_to_five_tables(raw, contract, paper_key=paper_key)
+                csv_result = write_tables_to_csv(
+                    tables=tables,
+                    contract=contract,
+                    output_dir=output_dir,
+                    overwrite=overwrite,
+                )
+                result.update({
+                    "output_dir": output_dir,
+                    "csv_files":  csv_result["csv_files"],
+                    "tables":     csv_result["tables"],
+                })
+
+            return result
+
         except Exception as exc:
             logger.exception("run_pipeline 失败: %s", pdf_path)
             return {"status": "error", "pdf_path": pdf_path, "error": str(exc)}
