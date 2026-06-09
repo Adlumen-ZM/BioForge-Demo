@@ -19,6 +19,7 @@ screen_agent/agent.py — ScreenAgent 封装
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from backend.src.agents.agent_template import AgentTemplate
@@ -73,7 +74,7 @@ class RealScreenAgent:
 
 
 def create_screen_agent(
-    model: str = "minimax/MiniMax-M2.7-highspeed",
+    model: str = None,
     temperature: float = 0.0,
     summary_mode: SummaryMode = SummaryMode.TEMPLATE,
 ) -> AgentTemplate:
@@ -88,6 +89,7 @@ def create_screen_agent(
     Returns:
         已初始化的 AgentTemplate 实例（plan 和 identity 已加载）。
     """
+    model = model or os.getenv("DEFAULT_LLM_MODEL", "deepseek/deepseek-chat")
     config = AgentTemplateConfig(
         agent_name="screen_agent",
         plan_path=_AGENT_DIR / "plan.yaml",
