@@ -39,31 +39,29 @@ except ImportError:
     _real_screen_paper = None  # type: ignore
 
 # ─────────────────────────────────────────────
-# download_paper：real/demo 模式用真实版，其余用 mock 版；
-# 真实版依赖（metapub/paperscraper）缺失时自动降级为 mock，确保工具始终注册。
+# download_paper：real/demo 模式加载真实版，其余模式加载 mock 版。
+# download_paper.py 内部已将 metapub/paperscraper 改为延迟导入，
+# 缺少 unidecode 等间接依赖时模块仍可加载，工具在调用阶段才失败（返回 download_status=failed）。
 # ─────────────────────────────────────────────
-_agent_mode = os.getenv("GRAPH_AGENT_MODE", "demo").lower()
+_agent_mode = os.getenv(“GRAPH_AGENT_MODE”, “demo”).lower()
 _DOWNLOAD_PAPER_LOADED = False
 _download_paper_tool = None  # type: ignore
 try:
-    if _agent_mode in ("real", "demo"):
+    if _agent_mode in (“real”, “demo”):
         from backend.src.tools.screen.download_paper import download_paper as _download_paper_tool
     else:
         from backend.src.tools.screen.download_paper_mock import download_paper as _download_paper_tool
     _DOWNLOAD_PAPER_LOADED = True
 except ImportError as _dp_import_err:
-    # 真实版依赖（metapub/paperscraper）不可用；自动降级为 mock，保证 LLM 始终有 download_paper 工具
+    # download_paper.py 本身的基础依赖（如 biopython/langchain-core）缺失；极少见
     import warnings as _warnings
     _warnings.warn(
-        f"[tools.registry] download_paper 真实版加载失败（{_dp_import_err}）；"
-        "已自动降级为 mock。请确认容器内已安装 metapub 和 paperscraper。",
+        f”[tools.registry] download_paper 加载失败（{_dp_import_err}）；”
+        “请确认容器内已安装 biopython 和 langchain-core。”,
         stacklevel=2,
     )
-    try:
-        from backend.src.tools.screen.download_paper_mock import download_paper as _download_paper_tool
-        _DOWNLOAD_PAPER_LOADED = True
-    except ImportError:
-        pass  # mock 也不可用时不注册，get_tools 会打印警告
+    _DOWNLOAD_PAPER_LOADED = False
+    _download_paper_tool = None  # type: ignore
 
 # ─────────────────────────────────────────────
 # 新 RAG 工具（主流程，extract_agent 使用）

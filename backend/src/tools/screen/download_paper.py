@@ -6,15 +6,36 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+import xml.etree.ElementTree as ET
+from typing import Any
+from urllib.parse import quote
+
 import requests
 from Bio import Entrez
 from langchain_core.tools import tool
-from metapub import FindIt, PubMedFetcher
-from paperscraper.pdf import save_pdf
 from pydantic import BaseModel, Field
-from typing import Any
-import xml.etree.ElementTree as ET
-from urllib.parse import quote
+
+# metapub 和 paperscraper 按需延迟导入；缺少 unidecode 等间接依赖时模块仍可加载，
+# 工具在运行时调用阶段给出明确的失败信息，而非在 import 期间崩溃。
+_METAPUB_OK: bool = False
+_METAPUB_ERR: str = ""
+_PAPERSCRAPER_OK: bool = False
+_PAPERSCRAPER_ERR: str = ""
+
+try:
+    from metapub import FindIt, PubMedFetcher as _PubMedFetcher
+    _METAPUB_OK = True
+except ImportError as _e:
+    FindIt = None  # type: ignore[assignment,misc]
+    _PubMedFetcher = None  # type: ignore[assignment,misc]
+    _METAPUB_ERR = str(_e)
+
+try:
+    from paperscraper.pdf import save_pdf as _save_pdf
+    _PAPERSCRAPER_OK = True
+except ImportError as _e:
+    _save_pdf = None  # type: ignore[assignment]
+    _PAPERSCRAPER_ERR = str(_e)
 
 # NCBI 凭据从环境变量读取
 NCBI_API_KEY = os.environ.get("NCBI_API_KEY", "")
@@ -56,6 +77,16 @@ def download_paper(
     返回字段：paper_key / pdf_path / download_status / file_sha256 / file_size_bytes /
              source_url / message
     """
+    # ── 0. 依赖可用性检查（metapub/paperscraper 缺失时给出明确错误而非崩溃）──
+    if not _METAPUB_OK:
+        return {
+            "status": "error",
+            "download_status": "failed",
+            "paper_key": _generate_paper_key(doi=doi, pmid=pmid, title=title) if any([doi, pmid, title]) else None,
+            "pdf_path": None,
+            "message": f"依赖缺失，无法执行真实下载（{_METAPUB_ERR}）。请在容器内执行：pip install metapub unidecode",
+        }
+
     # ── 1. 校验输入 ──────────────────────────────────────────────────────
     if not any([pmid, doi, title]):
         return {
@@ -118,7 +149,7 @@ def download_paper(
     success    = False
 
     # 方案 A：metapub FindIt（通过 PMID 找直链）
-    if pmid and not success:
+    if pmid and not success and _METAPUB_OK:
         try:
             src = FindIt(pmid)
             if src.url:
@@ -132,9 +163,9 @@ def download_paper(
             pass
 
     # 方案 B：paperscraper（PMC OA 文献，需要 pmcid）
-    if not success and fetched_pmcid:
+    if not success and fetched_pmcid and _PAPERSCRAPER_OK:
         try:
-            save_pdf(
+            _save_pdf(
                 {"doi": fetched_doi, "pmcid": "PMC" + fetched_pmcid},
                 filepath=str(pdf_path),
             )
@@ -215,14 +246,14 @@ def download_paper(
 
 # ─────────────────────────── 内部工具函数 ────────────────────────────────
 
-_fetcher_instance: PubMedFetcher | None = None
+_fetcher_instance: Any = None  # PubMedFetcher 或 None（metapub 不可用时）
 
 
-def _get_fetcher() -> PubMedFetcher:
-    """单例 PubMedFetcher，避免重复初始化。"""
+def _get_fetcher() -> Any:
+    """单例 PubMedFetcher，避免重复初始化。metapub 不可用时返回 None。"""
     global _fetcher_instance
-    if _fetcher_instance is None:
-        _fetcher_instance = PubMedFetcher()
+    if _METAPUB_OK and _fetcher_instance is None:
+        _fetcher_instance = _PubMedFetcher()
     return _fetcher_instance
 
 

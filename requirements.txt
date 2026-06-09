@@ -16,6 +16,26 @@ biopython>=1.84
 
 # ==================== 文献下载 ====================
 paperscraper>=0.3.0
+# metapub 直接依赖（pip 不一定自动安装所有间接依赖，显式声明保证镜像完整性）
+unidecode>=1.3.0        # metapub 必须；缺失会导致 ImportError
+eutils>=0.6.0           # metapub：PubMed E-utilities 客户端
+tabulate>=0.8.0         # metapub：结果格式化
+habanero>=1.2.3         # metapub：Crossref DOI 查询
+six>=1.16.0             # metapub 兼容层
+# paperscraper / download_paper 链路其余依赖
+lxml>=4.9.0
+lxml-html-clean>=0.4.0
+cssselect>=1.2.0
+coloredlogs>=15.0
+humanfriendly>=10.0
+python-Levenshtein>=0.27.0
+rapidfuzz>=3.14.0
+arxiv>=2.4.0
+tldextract>=5.3.0
+requests-file>=3.0.0
+beautifulsoup4>=4.9.0
+bs4>=0.0.2
+boto3>=1.43.0
 
 # ==================== 数据分析 ====================
 numpy>=1.20.0
