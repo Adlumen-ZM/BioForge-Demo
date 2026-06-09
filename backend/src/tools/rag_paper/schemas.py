@@ -21,7 +21,8 @@ class RunBioPaperPipelineInput(BaseModel):
     pdf_path: str = Field(
         ...,
         description=(
-            "本地 PDF 文件的绝对路径，例如 /data/papers/example.pdf。"
+            "本地 PDF 文件的绝对路径。必须使用上游传入的真实路径，"
+            "不要自行编造或回退到示例路径。"
             "文件必须存在且可读，否则抛出 FileNotFoundError。"
         ),
     )
@@ -53,7 +54,8 @@ class ParsePDFInput(BaseModel):
     pdf_path: str = Field(
         ...,
         description=(
-            "本地 PDF 文件的绝对路径，例如 /data/papers/example.pdf。"
+            "本地 PDF 文件的绝对路径。必须使用上游传入的真实路径，"
+            "不要自行编造或回退到示例路径。"
             "解析结果会缓存到临时目录，后续可用 retrieve_pdf_evidence 检索。"
         ),
     )

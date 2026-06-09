@@ -7,6 +7,7 @@ import json
 import os
 import time
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,15 @@ class DownloadPaperInput(BaseModel):
     title: str | None = Field(default=None, description="Paper title")
     extraction_profile: str = Field(default="hap_peptide_v1", description="Storage profile")
     run_id: str | None = Field(default=None, description="Current pipeline run id")
+    force_redownload: bool = Field(default=False, description="Redownload even if cached")
+
+
+class DownloadPapersBatchInput(BaseModel):
+    pmids: list[str] = Field(description="PubMed IDs to download in parallel")
+    extraction_profile: str = Field(default="hap_peptide_v1", description="Storage profile")
+    run_id: str | None = Field(default=None, description="Current pipeline run id")
+    max_papers: int = Field(default=10, description="Maximum papers to attempt in one batch")
+    max_workers: int = Field(default=10, description="Maximum concurrent download workers")
     force_redownload: bool = Field(default=False, description="Redownload even if cached")
 
 
@@ -265,6 +275,103 @@ def download_paper(
     }
     _trace_download_event("pdf_download_finished", "success", started_at, {**trace_ctx, **result})
     return result
+
+
+@tool("download_papers_batch", args_schema=DownloadPapersBatchInput)
+def download_papers_batch(
+    pmids: list[str],
+    extraction_profile: str = "hap_peptide_v1",
+    run_id: str | None = None,
+    max_papers: int = 10,
+    max_workers: int = 10,
+    force_redownload: bool = False,
+) -> dict[str, Any]:
+    """Download up to 10 screened papers concurrently and return per-paper results."""
+    seen: set[str] = set()
+    ordered_pmids: list[str] = []
+    for pmid in pmids or []:
+        normalized = str(pmid).strip()
+        if normalized and normalized not in seen:
+            ordered_pmids.append(normalized)
+            seen.add(normalized)
+
+    limit = max(1, min(int(max_papers or 10), 10))
+    worker_count = max(1, min(int(max_workers or 10), limit))
+    selected_pmids = ordered_pmids[:limit]
+
+    if not selected_pmids:
+        return {
+            "download_results": [],
+            "download_summary": "No PMID values were provided for batch download.",
+            "successful_count": 0,
+            "failed_count": 0,
+        }
+
+    results_by_pmid: dict[str, dict[str, Any]] = {}
+
+    def _download_one(pmid: str) -> dict[str, Any]:
+        try:
+            result = download_paper.invoke(
+                {
+                    "pmid": pmid,
+                    "extraction_profile": extraction_profile,
+                    "run_id": run_id,
+                    "force_redownload": force_redownload,
+                }
+            )
+            if isinstance(result, dict):
+                result.setdefault("pmid", pmid)
+                return result
+        except Exception as exc:
+            return {
+                "pmid": pmid,
+                "status": "error",
+                "download_status": "failed",
+                "pdf_path": None,
+                "failure_reason": f"batch_download_failed:{type(exc).__name__}",
+                "message": str(exc),
+            }
+        return {
+            "pmid": pmid,
+            "status": "error",
+            "download_status": "failed",
+            "pdf_path": None,
+            "failure_reason": "invalid_tool_result",
+            "message": "download_paper returned a non-dict result",
+        }
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {executor.submit(_download_one, pmid): pmid for pmid in selected_pmids}
+        for future in as_completed(futures):
+            pmid = futures[future]
+            try:
+                results_by_pmid[pmid] = future.result()
+            except Exception as exc:
+                results_by_pmid[pmid] = {
+                    "pmid": pmid,
+                    "status": "error",
+                    "download_status": "failed",
+                    "pdf_path": None,
+                    "failure_reason": f"batch_worker_failed:{type(exc).__name__}",
+                    "message": str(exc),
+                }
+
+    download_results = [results_by_pmid[pmid] for pmid in selected_pmids]
+    successful_count = sum(
+        1
+        for result in download_results
+        if result.get("download_status") in ("downloaded", "already_exists")
+    )
+
+    return {
+        "download_results": download_results,
+        "download_summary": (
+            f"Batch attempted {len(download_results)} papers with {worker_count} workers; "
+            f"downloaded {successful_count}, failed {len(download_results) - successful_count}."
+        ),
+        "successful_count": successful_count,
+        "failed_count": len(download_results) - successful_count,
+    }
 
 
 _fetcher_instance: Any = None

@@ -270,7 +270,7 @@ def _reconstruct_from_tool_messages(messages: list, step: PlanStep) -> dict[str,
     目前支持的工具：
       pubmed_search → raw_candidates + raw_candidate_ids + search_stats
       screen_paper  → screened_paper_ids + screened_count + screen_summary
-      download_paper → download_results
+      download_paper/download_papers_batch → download_results
     """
     try:
         from langchain_core.messages import ToolMessage
@@ -302,6 +302,10 @@ def _reconstruct_from_tool_messages(messages: list, step: PlanStep) -> dict[str,
                 # download_paper 结果：包含 download_status
                 if "download_status" in tool_result:
                     download_results.append(tool_result)
+                if "download_results" in tool_result and isinstance(tool_result["download_results"], list):
+                    download_results.extend(
+                        r for r in tool_result["download_results"] if isinstance(r, dict)
+                    )
 
             except Exception:
                 continue
@@ -334,8 +338,11 @@ def _reconstruct_from_tool_messages(messages: list, step: PlanStep) -> dict[str,
             output.setdefault("screened_count", last.get("screened_count", 0))
             output.setdefault("screen_summary", last.get("screen_summary", ""))
 
-        # 汇总 download_paper 结果
-        if download_results and "download_paper" in step.tools_required:
+        # 汇总 download_paper / download_papers_batch 结果
+        if download_results and (
+            "download_paper" in step.tools_required
+            or "download_papers_batch" in step.tools_required
+        ):
             output.setdefault("download_results", download_results)
 
         return output if output else None

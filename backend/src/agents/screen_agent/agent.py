@@ -99,7 +99,7 @@ def create_screen_agent(
         temperature=temperature,
         tools=[
             "screen_paper",
-            "download_paper",
+            "download_papers_batch",
         ],
         max_step_retries=2,
         max_plan_retries=1,

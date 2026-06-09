@@ -51,8 +51,10 @@ _download_paper_tool = None  # type: ignore
 try:
     if _agent_mode in ("real", "demo"):
         from backend.src.tools.screen.download_paper import download_paper as _download_paper_tool
+        from backend.src.tools.screen.download_paper import download_papers_batch as _download_papers_batch_tool
     else:
         from backend.src.tools.screen.download_paper_mock import download_paper as _download_paper_tool
+        _download_papers_batch_tool = None  # type: ignore
     _DOWNLOAD_PAPER_LOADED = True
 except Exception as _dp_import_err:
     # ImportError / SyntaxError（间接依赖语法问题）均在此捕获，降级为不注册
@@ -65,6 +67,7 @@ except Exception as _dp_import_err:
     )
     _DOWNLOAD_PAPER_LOADED = False
     _download_paper_tool = None  # type: ignore
+    _download_papers_batch_tool = None  # type: ignore
 
 # ─────────────────────────────────────────────
 # 新 RAG 工具（主流程，extract_agent 使用）
@@ -159,6 +162,8 @@ if _SCREEN_PAPER_LOADED and _real_screen_paper is not None:
 # ── download_paper（real / mock 由 GRAPH_AGENT_MODE 决定）──
 if _DOWNLOAD_PAPER_LOADED and _download_paper_tool is not None:
     _REGISTRY["download_paper"] = _download_paper_tool
+if _DOWNLOAD_PAPER_LOADED and _download_papers_batch_tool is not None:
+    _REGISTRY["download_papers_batch"] = _download_papers_batch_tool
 
 # ── 新 RAG 工具（rag_paper，主流程使用）──
 if _RAG_PAPER_TOOLS_LOADED:

@@ -49,12 +49,14 @@ steps:
       在「已完成步骤摘要及输出数据」中找到 screen_papers 步骤输出的
       screened_paper_ids 列表（这些是通过筛选的 PMID）。
 
-      对 screened_paper_ids 中的每一篇，逐篇调用 download_paper 工具：
-        - pmid：论文的 PubMed ID
+      一次性调用 download_papers_batch 工具，不要逐篇调用下载工具：
+        - pmids：screened_paper_ids 的前 10 个 PMID
         - run_id：在「上游 Agent 输出」的 run_id 字段（若无则省略）
 
-      失败（download_status == "failed"）时记录原因并继续下一篇，不中止流程。
-      尽可能多下载，目标 5-10 篇 OA 论文。
+        - max_papers：10
+        - max_workers：10
+
+      工具会在程序层并行下载这 10 篇；失败项保留原因，不要为了补齐成功数继续扩展到第 11 篇或更多候选文献。
 
       ⚠️ 重要：只输出以下 JSON，不要有任何解释文字。
       download_results 中每个成功项必须包含工具返回的 pdf_path 字段（失败项 pdf_path 为 null）。
@@ -69,7 +71,7 @@ steps:
       }
       ```
     tools_required:
-      - "download_paper"
+      - "download_papers_batch"
     success_criteria:
       required_fields:
         - "download_results"

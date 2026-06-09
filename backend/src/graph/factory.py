@@ -60,8 +60,26 @@ def _wrap_extract(mode: str):
             self._agent = create_extract_agent()
 
         def run(self, input_data: dict) -> dict:
+            # 将 RAG 工具调用所需的关键字段显式注入 upstream_context，
+            # 避免 LLM 在未看到真实值时退回到 schema/example 中的占位路径。
+            _UPSTREAM_KEYS = (
+                "run_id",
+                "pdf_path",
+                "pdf_name",
+                "paper_key",
+                "extraction_profile",
+                "template_id",
+                "output_dir",
+                "schema_template_path",
+                "screen_summary",
+            )
+            upstream = {
+                k: v for k, v in input_data.items()
+                if k in _UPSTREAM_KEYS and v is not None and v != [] and v != ""
+            }
             return self._agent.run(
                 pipeline_state=input_data,
+                upstream_context=upstream if upstream else None,
                 run_id=input_data.get("run_id"),
             )
 
