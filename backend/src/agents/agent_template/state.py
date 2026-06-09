@@ -63,13 +63,18 @@ class TemplateAgentState:
     retry_counts: dict[str, int] = field(default_factory=dict)
     """各 step_id 的实际重试次数，key=step_id, value=重试次数（不含首次执行）。"""
 
+    passed_step_ids: set = field(default_factory=set)
+    """通过了 validate_step 校验的 step_id 集合。只有进入此集合的 step 才会出现在
+    completed_summaries() 中，防止 retry 中间结果污染后续 step 的上下文。"""
+
     # ── 时间 ──────────────────────────────────
     started_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     """run 开始时间（UTC），用于 trace 的 plan_end 事件计算总耗时。"""
 
     def record_result(self, result: StepResult) -> None:
-        """追加一个 step 结果并推进索引。"""
+        """追加一个通过校验的 step 结果并推进索引。"""
         self.step_results.append(result)
+        self.passed_step_ids.add(result.step_id)
         self.current_step_index += 1
 
     def increment_retry(self, step_id: str) -> int:
@@ -82,18 +87,21 @@ class TemplateAgentState:
         return self.retry_counts.get(step_id, 0)
 
     def completed_summaries(self) -> list[dict]:
-        """返回所有已完成 step 的摘要信息，供 context_builder 注入下一 step。
+        """返回已通过校验的 step 摘要，供 context_builder 注入下一 step。
 
-        只返回 status=='success' 的 step，失败/跳过的不提供正向上下文。
-        包含实际 output 数据，让后续 step（如 dedup_filter）能看到前序 step 的结果。
+        只包含进入 passed_step_ids 的 step，排除 retry 中间失败结果，
+        防止 LLM 误认为某 step 已完成而跳过工具调用。
+        对同一 step_id 取最后一次通过校验的结果（通常只有一次）。
         """
-        return [
-            {
-                "step_id": r.step_id,
-                "summary": r.summary.model_dump(),
-                "output_keys": list(r.output.keys()),
-                "output": r.output,
-            }
-            for r in self.step_results
-            if r.status == "success"
-        ]
+        seen: set = set()
+        result_list = []
+        for r in reversed(self.step_results):
+            if r.step_id in self.passed_step_ids and r.step_id not in seen:
+                seen.add(r.step_id)
+                result_list.append({
+                    "step_id": r.step_id,
+                    "summary": r.summary.model_dump(),
+                    "output_keys": list(r.output.keys()),
+                    "output": r.output,
+                })
+        return list(reversed(result_list))
