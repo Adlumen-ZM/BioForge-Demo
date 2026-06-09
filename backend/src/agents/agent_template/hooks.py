@@ -156,20 +156,78 @@ class TraceBackend(ABC):
 
 
 class NullBackend(TraceBackend):
-    """默认 Trace 后端：只打印，不写入任何存储，不报错。
+    """默认 Trace 后端：将 plan/step 事件路由到 cli_log_buffer（Pipeline Progress 日志区），
+    若 trace_manager 未初始化则降级为 print。
 
-    v0.1 使用此后端进行「空跑」，便于通过控制台观察运行轨迹。
-
+    v0.1 使用此后端，便于通过 CLI 进度面板观察 Agent 运行轨迹。
     替换为真实后端示例（在 template_agent.py 或 search_agent/agent.py 中）：
         from backend.src.db_access.trace.postgres_backend import PostgresBackend
         hook = TraceHook(backend=PostgresBackend(session=db_session))
     """
 
+    # 显示用的 stage → 标签（最多 8 字符）
+    _LABELS: dict[str, str] = {
+        "search_agent": "SEARCH",
+        "screen_agent":  "SCREEN",
+        "extract_agent": "EXTRACT",
+        "guide_agent":   "GUIDE",
+    }
+
     def write(self, event: TraceEvent) -> None:
+        """优先写入 cli_log_buffer；无 trace_manager 时降级为 print。"""
+        try:
+            from backend.src.db_access.trace.trace_manager import get_manager
+            m = get_manager()
+            if m is not None:
+                line = self._format_for_buffer(event)
+                if line:
+                    buf = m.cli_log_buffer
+                    buf.append(line)
+                    # 限制缓存行数
+                    while len(buf) > 60:
+                        buf.pop(0)
+                return  # 不再 print
+        except Exception:
+            pass
+
+        # fallback（无 trace_manager 时打印，如单元测试场景）
         print(f"[TRACE] {event.event_type} | stage={event.stage} | run={event.run_id} | "
               f"agent_run={event.agent_run_id} | step={event.step_id} | "
               f"status={event.status} | duration_ms={event.duration_ms} | "
               f"payload={event.payload}")
+
+    def _format_for_buffer(self, event: TraceEvent) -> str:
+        """将 TraceEvent 格式化为单行字符串，显示在 Pipeline Progress 日志区。"""
+        etype  = event.event_type
+        stage  = event.stage or ""
+        label  = self._LABELS.get(stage, stage.upper()[:8] or "AGENT")
+        step   = event.step_id or ""
+        status = event.status or ""
+        ok_icon = "✓" if status == "success" else "✗" if status in ("failed", "error") else "▶"
+
+        if etype == "plan_start":
+            n = event.payload.get("total_steps", "?")
+            return f"[{label}] ▶ plan开始 ({n} steps)"
+
+        elif etype == "step_start":
+            name = event.payload.get("step_name", step)
+            return f"[{label}] ▶ {name}"
+
+        elif etype == "step_end":
+            name = event.payload.get("step_name", step)
+            ms = f" ({event.duration_ms:.0f}ms)" if event.duration_ms else ""
+            if status in ("failed", "error"):
+                err = str(event.payload.get("error_message") or "")[:40]
+                return f"[{label}] ✗ {name}{ms}: {err}"
+            return f"[{label}] ✓ {name}{ms}"
+
+        elif etype == "plan_end":
+            s_ok  = event.payload.get("successful_steps", "?")
+            s_all = event.payload.get("total_steps", "?")
+            ms = f" ({event.duration_ms:.0f}ms)" if event.duration_ms else ""
+            return f"[{label}] {ok_icon} plan结束 {s_ok}/{s_all} steps{ms}"
+
+        return ""
 
 
 # ─────────────────────────────────────────────

@@ -386,6 +386,24 @@ def search_node(state: PipelineState) -> dict[str, Any]:
     ok            = _is_ok(output)
     candidate_ids = list(output.get("candidate_paper_ids") or [])
     candidates    = list(output.get("candidates") or [])
+
+    # 兜底：若 dedup_filter 未能输出 candidate_paper_ids，
+    # 从 raw_candidates（search_execute 输出）中提取 PMID
+    if not candidate_ids:
+        raw_cands = list(output.get("raw_candidates") or [])
+        if raw_cands:
+            seen: set[str] = set()
+            for c in raw_cands:
+                pid = str(c.get("pmid") or "").strip()
+                if pid and pid not in seen:
+                    candidate_ids.append(pid)
+                    candidates.append(c)
+                    seen.add(pid)
+            if candidate_ids:
+                _trace_safe("search_fallback_extract", stage="search",
+                            payload={"fallback_count": len(candidate_ids),
+                                     "note": "从 raw_candidates 兜底提取"})
+                ok = True  # 有候选就认为 ok
     queries       = output.get("queries") or []
     query_strings = [q.get("query_string", "") for q in queries if q.get("query_string")]
 

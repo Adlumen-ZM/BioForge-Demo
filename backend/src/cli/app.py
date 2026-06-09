@@ -29,6 +29,7 @@ Banner 设计（§10）：
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from rich.console import Console, Group
 from rich.panel import Panel
@@ -126,42 +127,24 @@ def print_banner(results: list[dict]) -> None:
     console.print()
 
 
-def main():
-    """CLI 主函数。
+def _run_demo(session: Any, console: Any) -> None:
+    """执行一次完整的 demo 流水线（Guide + 搜索/筛选/提取/写库）。
 
-    步骤：
-      1. 环境检测
-      2. 打印 banner（单 Panel，含系统状态）
-      3. 初始化 CLISession（生成 run_id/thread_id）
-      4-6. Guide Agent 三步中断对话
-      7-9. 流水线执行（Search/Screen/Extract 实时进度）
-      10. REPL（规划中）
+    调用方（main REPL）负责异常捕获和 trace_manager 关闭。
     """
     from backend.src.cli.conversation import run_guide_conversation
     from backend.src.cli.pipeline_view import run_pipeline_view
     from backend.src.graph.pipeline import build_graph
     from langgraph.checkpoint.memory import MemorySaver
+    from backend.src.db_access.trace.trace_manager import TraceManager, set_manager
 
-    # ── 步骤 1：环境检测（静默，结果交给 banner 显示）────────────────────────
-    results = run_system_check()
-
-    # ── 步骤 2：Banner ────────────────────────────────────────────────────────
-    print_banner(results)
-
-    # ── 步骤 3：初始化会话 + TraceManager ────────────────────────────────────
-    session = CLISession()
-    run_id  = session.new_run_id()
+    run_id = session.new_run_id()
     console.print(f"[dim]Session: {run_id}  ·  Thread: {session.thread_id}[/dim]\n")
 
-    # TraceManager：file sink + CLI buffer sink，目录 data/runs/YYYYMMDD/{run_id}/
-    from backend.src.db_access.trace.trace_manager import TraceManager, set_manager
     trace_manager = TraceManager.create(run_id=run_id)
     set_manager(trace_manager)
 
-    # ── 步骤 4-6：构建 graph + Guide 三步对话 ─────────────────────────────────
-    # MemorySaver 提供 interrupt/resume 所需的检查点支持（进程内有效）
     checkpointer = MemorySaver()
-
     mode  = os.getenv("GRAPH_AGENT_MODE", "demo")
     graph = build_graph(mode=mode, checkpointer=checkpointer)
 
@@ -175,38 +158,88 @@ def main():
             session=session,
         )
 
-        # ── 步骤 7-9：流水线执行（pipeline_view 驱动真实 graph.stream）──────
         if was_confirmed:
             final_state = run_pipeline_view(
                 graph=graph,
                 session=session,
                 trace_manager=trace_manager,
             )
-
-            # 记录历史
             session.add_history({
                 "run_id":  run_id,
                 "status":  final_state.get("status", "success"),
                 "summary": f"流水线执行完成 status={final_state.get('status', '?')}",
             })
 
-            # ── 步骤 10：REPL（规划中）──────────────────────────────────────
-            console.print("[dim]输入 /quit 退出[/dim]\n")
-
-    except KeyboardInterrupt:
-        console.print("\n[yellow]已中断[/yellow]")
-        session.add_history({"run_id": run_id, "status": "interrupted", "summary": "用户中断"})
-
-    except Exception as e:
-        console.print(f"\n[red]错误：{e}[/red]")
-        session.add_history({"run_id": run_id, "status": "error", "summary": str(e)})
-
     finally:
-        # 关闭 trace sink（刷写文件句柄）
         try:
             trace_manager.close()
         except Exception:
             pass
+
+
+def _print_help() -> None:
+    """打印 REPL 帮助信息。"""
+    console.print(
+        "\n  [bold cyan]可用命令[/bold cyan]\n"
+        "   [yellow]/demo[/yellow]   — 启动 HAp 肽段文献挖掘 demo 流水线\n"
+        "   [yellow]/help[/yellow]   — 显示本帮助\n"
+        "   [yellow]/quit[/yellow]   — 退出\n"
+    )
+
+
+def main():
+    """CLI 主函数：banner → REPL 命令循环。
+
+    步骤：
+      1. 环境检测
+      2. 打印 banner（单 Panel，含系统状态）
+      3. REPL 循环：等待用户输入 /demo / /help / /quit
+      4. /demo 触发 Guide 四步对话 + 流水线执行
+    """
+    # ── 步骤 1：环境检测 ──────────────────────────────────────────────────────
+    results = run_system_check()
+
+    # ── 步骤 2：Banner ────────────────────────────────────────────────────────
+    print_banner(results)
+
+    session = CLISession()
+
+    # ── 步骤 3：REPL 命令循环 ─────────────────────────────────────────────────
+    console.print("  [dim]输入 [bold]/demo[/bold] 开始体验  ·  [bold]/help[/bold] 查看命令  ·  [bold]/quit[/bold] 退出[/dim]\n")
+
+    while True:
+        try:
+            cmd = input("  > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[yellow]已退出[/yellow]")
+            break
+
+        if not cmd:
+            continue
+
+        if cmd in ("/quit", "quit", "exit", "q"):
+            console.print("[dim]Goodbye.[/dim]")
+            break
+
+        elif cmd in ("/help", "help", "/?"):
+            _print_help()
+
+        elif cmd in ("/demo", "demo"):
+            try:
+                _run_demo(session, console)
+            except KeyboardInterrupt:
+                console.print("\n[yellow]已中断[/yellow]")
+                session.add_history({"run_id": session.run_id or "?",
+                                     "status": "interrupted", "summary": "用户中断"})
+            except Exception as e:
+                console.print(f"\n[red]错误：{e}[/red]")
+                session.add_history({"run_id": session.run_id or "?",
+                                     "status": "error", "summary": str(e)})
+            # demo 结束后回到 REPL
+            console.print("\n  [dim]输入 [bold]/demo[/bold] 再次运行  ·  [bold]/quit[/bold] 退出[/dim]\n")
+
+        else:
+            console.print(f"  [dim]未知命令：{cmd!r}。输入 /help 查看可用命令。[/dim]")
 
 
 if __name__ == "__main__":

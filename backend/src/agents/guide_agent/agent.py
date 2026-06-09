@@ -34,6 +34,11 @@ import yaml
 # 当前文件所在目录（guide_agent/）
 _AGENT_DIR = Path(__file__).parent
 
+# Guide LLM 结果缓存：run_id → result dict
+# LangGraph 每次 interrupt resume 都会重新执行 guide_node，
+# 用此缓存避免对同一 run_id 重复调用 LLM（昂贵）
+_GUIDE_RESULT_CACHE: dict[str, dict] = {}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pydantic 输出校验模型
@@ -501,6 +506,7 @@ def build_guide_node(
           1. interrupt(payload) → 图暂停，payload 传给 CLI 渲染
           2. 用户按 Enter → CLI 调用 Command(resume=0) 继续
           3. interrupt() 返回值 = resume 值
+          （注：LangGraph 每次 resume 都重新执行本节点；用 _GUIDE_RESULT_CACHE 避免重复调 LLM）
 
         最终写入 PipelineState：
           query / refined_task_prompt / refined_screening_criteria /
@@ -508,7 +514,15 @@ def build_guide_node(
           user_confirmed / raw_user_prompt / raw_user_screening_rules
         """
         user_query = state.get("user_query", "") if hasattr(state, "get") else ""
-        result = agent.run({"user_query": user_query})
+        run_id     = state.get("run_id", "") if hasattr(state, "get") else ""
+
+        # 同一 run_id 只调一次 LLM（LangGraph resume 时会重执行本函数）
+        if run_id and run_id in _GUIDE_RESULT_CACHE:
+            result = _GUIDE_RESULT_CACHE[run_id]
+        else:
+            result = agent.run({"user_query": user_query})
+            if run_id:
+                _GUIDE_RESULT_CACHE[run_id] = result
 
         try:
             from langgraph.types import interrupt as lg_interrupt
