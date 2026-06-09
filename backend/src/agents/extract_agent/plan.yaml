@@ -27,26 +27,33 @@ steps:
         RAGFlow 视觉解析 → BGE-M3 混合检索 → LLM 字段抽取 →
         枚举归一化 → 五表 CSV 写出
 
-      最终回答必须是严格的 JSON 格式：
+      最终回答必须是且只能是严格的 JSON 对象，不得含任何说明文字：
       {
         "status": "ok" | "error",
-        "output_dir": "<CSV 输出目录路径>",
+        "output_dir": "<CSV 输出目录路径，失败时为 null>",
         "csv_files": {
-          "paper": "<path>",
-          "paper_entity_record": "<path>",
-          "entity_component": "<path>",
-          "record_function": "<path>",
-          "function_assay_evidence": "<path>"
+          "paper": "<path 或 null>",
+          "paper_entity_record": "<path 或 null>",
+          "entity_component": "<path 或 null>",
+          "record_function": "<path 或 null>",
+          "function_assay_evidence": "<path 或 null>"
         },
         "tables": {
-          "paper": {"rows": <int>},
-          "paper_entity_record": {"rows": <int>},
-          "entity_component": {"rows": <int>},
-          "record_function": {"rows": <int>},
-          "function_assay_evidence": {"rows": <int>}
+          "paper": {"rows": 0},
+          "paper_entity_record": {"rows": 0},
+          "entity_component": {"rows": 0},
+          "record_function": {"rows": 0},
+          "function_assay_evidence": {"rows": 0}
         },
-        "error": "<错误信息或 null>"
+        "error": "<工具返回的错误信息，成功时为 null>"
       }
+
+      重要规则（必须遵守）：
+      1. 即使工具返回 status=error，也必须输出以上 JSON 结构，
+         将工具的错误信息放入 error 字段，status 填 "error"，
+         output_dir 和 csv_files 各路径填 null，tables 各 rows 填 0。
+      2. 禁止输出任何 JSON 以外的文字（包括道歉、解释、Markdown 代码块说明）。
+      3. 如工具未被调用或调用失败，直接构造 status=error 的 JSON 返回。
     tools_required:
       - "run_bio_paper_extraction_pipeline"
     success_criteria:

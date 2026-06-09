@@ -21,6 +21,9 @@ constraints:
   - "LLM  reasoning 过程必须完整记录，供后续追溯"
 
 output_contract:
-  extracted_papers: "list[dict]，每篇论文的抽取结果，包含所有业务字段"
-  extraction_summary: "不超过 200 字的抽取过程摘要，说明成功/失败原因"
-  failed_papers: "list[dict]，抽取失败的论文及其错误原因"
+  status: "\"ok\" 或 \"error\"，表示本次 RAG 端到端抽取是否成功"
+  output_dir: "CSV 文件写出目录的绝对路径；失败时为 null"
+  csv_files: "dict，五张 CSV 文件的完整路径（paper / paper_entity_record / entity_component / record_function / function_assay_evidence）；失败时各值为 null"
+  tables: "dict，各 CSV 表的行数统计 {table_name: {rows: int}}；失败时各 rows 为 0"
+  extract_summary: "不超过 200 字的抽取过程摘要，说明成功行数或失败原因"
+  error: "工具返回的错误详情；成功时为 null"

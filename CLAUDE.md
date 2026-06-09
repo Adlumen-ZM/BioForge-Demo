@@ -51,7 +51,7 @@ backend/src/
 │   │   └── __init__.py      ← 导出 build_guide_node()
 │   ├── search_agent/        ← SearchAgent（AgentTemplate 实例）
 │   ├── screen_agent/        ← ScreenAgent（v0.1 stub）
-│   ├── extract_agent/       ← ExtractAgent（旧 MVP，原样不动）
+│   ├── extract_agent/       ← ExtractAgent（RAG CSV 抽取；plan.yaml v2.0 — 即使工具失败也强制 JSON 输出）
 │   └── _template/           ← 新 agent 的骨架模具
 ├── tools/
 │   ├── registry.py          ← get_tools(names) 工具注册表（懒加载，Exception 捕获含 SyntaxError 的一切导入失败，降级为 stub）
