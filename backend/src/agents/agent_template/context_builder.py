@@ -173,16 +173,37 @@ def _build_history_section(completed_summaries: list[dict]) -> str:
 
 
 def _truncate_output(output: dict[str, Any], max_list_items: int = 200) -> str:
-    """将 output dict 序列化为 JSON，大列表截断至 max_list_items 条。"""
+    """将 output dict 序列化为 JSON，大列表截断至 max_list_items 条。
+
+    同时截断列表项中的长字符串字段（如 abstract），防止传入上下文时 token 爆炸。
+    """
     import json
     truncated: dict[str, Any] = {}
     for k, v in output.items():
         if isinstance(v, list) and len(v) > max_list_items:
-            truncated[k] = v[:max_list_items]
+            truncated[k] = [_trim_item(item) for item in v[:max_list_items]]
             truncated[f"_{k}_note"] = f"已截断，原始共 {len(v)} 条"
+        elif isinstance(v, list):
+            truncated[k] = [_trim_item(item) for item in v]
         else:
             truncated[k] = v
     return json.dumps(truncated, ensure_ascii=False, indent=2)
+
+
+def _trim_item(item: Any, max_str_len: int = 150) -> Any:
+    """截断 dict 中过长的字符串字段（如 abstract）以控制 token 消耗。
+
+    仅截断 > max_str_len 的字段。pmid/doi/title 等短字段不受影响。
+    """
+    if not isinstance(item, dict):
+        return item
+    result: dict[str, Any] = {}
+    for k, v in item.items():
+        if isinstance(v, str) and len(v) > max_str_len:
+            result[k] = v[:max_str_len] + "…"
+        else:
+            result[k] = v
+    return result
 
 
 def _build_upstream_section(upstream_context: dict) -> str:

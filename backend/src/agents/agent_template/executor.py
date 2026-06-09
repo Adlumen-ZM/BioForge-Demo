@@ -100,6 +100,19 @@ def run_step(
         # ── 6. 将文本解析为结构化 output dict──────────────────────────────
         output = _extract_output(output_text, step)
 
+        # ── 6b. 从 ToolMessages 补全数据（LLM 输出过大时的兜底）────────────
+        # 当 LLM 最终输出无法解析（raw_output）或缺少工具产出的关键字段时，
+        # 直接从 ReAct 消息历史的 ToolMessage 中重建结构化数据，
+        # 避免因 output token 上限导致整步失败。
+        if step.tools_required:
+            reconstructed = _reconstruct_from_tool_messages(
+                result.get("messages", []), step
+            )
+            if reconstructed:
+                merged = dict(reconstructed)
+                merged.update({k: v for k, v in output.items() if k != "raw_output"})
+                output = merged
+
         # ── 7. 生成 StepSummary（纯函数，不调 LLM）─────────────────────────
         summary = _build_summary(output, step)
 
@@ -219,6 +232,86 @@ def _extract_output(text: str, step: PlanStep) -> dict[str, Any]:
 
     # 策略 4：Fallback — 原文存储，由 validator 的 required_fields 规则捕获失败
     return {"raw_output": text}
+
+
+def _reconstruct_from_tool_messages(messages: list, step: PlanStep) -> dict[str, Any] | None:
+    """从 ReAct ToolMessages 中重建结构化输出。
+
+    当 LLM 最终输出因 token 上限被截断（导致 JSON 无效）时，
+    直接从消息历史中的工具调用结果里提取数据，避免整步失败。
+
+    目前支持的工具：
+      pubmed_search → raw_candidates + raw_candidate_ids + search_stats
+      screen_paper  → screened_paper_ids + screened_count + screen_summary
+      download_paper → download_results
+    """
+    try:
+        from langchain_core.messages import ToolMessage
+
+        pubmed_results: list[dict] = []
+        screen_results: list[dict] = []
+        download_results: list[dict] = []
+
+        for msg in messages:
+            if not isinstance(msg, ToolMessage):
+                continue
+            try:
+                content = msg.content
+                tool_result = json.loads(content) if isinstance(content, str) else content
+                if not isinstance(tool_result, dict):
+                    continue
+
+                # pubmed_search 结果：包含 candidates 列表
+                if "candidates" in tool_result and isinstance(tool_result["candidates"], list):
+                    pubmed_results.append(tool_result)
+
+                # screen_paper 结果：包含 screened_paper_ids
+                if "screened_paper_ids" in tool_result:
+                    screen_results.append(tool_result)
+
+                # download_paper 结果：包含 download_status
+                if "download_status" in tool_result:
+                    download_results.append(tool_result)
+
+            except Exception:
+                continue
+
+        output: dict[str, Any] = {}
+
+        # 合并 pubmed_search 结果
+        if pubmed_results and "pubmed_search" in step.tools_required:
+            seen: set[str] = set()
+            all_candidates: list[dict] = []
+            for r in pubmed_results:
+                for c in (r.get("candidates") or []):
+                    pmid = str(c.get("pmid") or "").strip()
+                    if pmid and pmid not in seen:
+                        seen.add(pmid)
+                        all_candidates.append(c)
+            if all_candidates:
+                output["raw_candidates"] = all_candidates
+                output["raw_candidate_ids"] = [c["pmid"] for c in all_candidates]
+                output["search_stats"] = {
+                    "queries_executed": len(pubmed_results),
+                    "raw_total": sum(len(r.get("candidates") or []) for r in pubmed_results),
+                    "after_dedup": len(all_candidates),
+                }
+
+        # 合并 screen_paper 结果（最后一次调用的结果为准）
+        if screen_results and "screen_paper" in step.tools_required:
+            last = screen_results[-1]
+            output.setdefault("screened_paper_ids", last.get("screened_paper_ids") or [])
+            output.setdefault("screened_count", last.get("screened_count", 0))
+            output.setdefault("screen_summary", last.get("screen_summary", ""))
+
+        # 汇总 download_paper 结果
+        if download_results and "download_paper" in step.tools_required:
+            output.setdefault("download_results", download_results)
+
+        return output if output else None
+
+    except Exception:
+        return None
 
 
 def _build_summary(output: dict[str, Any], step: PlanStep) -> StepSummary:

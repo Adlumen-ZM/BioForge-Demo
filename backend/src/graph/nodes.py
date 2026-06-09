@@ -387,10 +387,19 @@ def search_node(state: PipelineState) -> dict[str, Any]:
     candidate_ids = list(output.get("candidate_paper_ids") or [])
     candidates    = list(output.get("candidates") or [])
 
-    # 兜底：若 dedup_filter 未能输出 candidate_paper_ids，
-    # 从 raw_candidates（search_execute 输出）中提取 PMID
+    # 兜底层 1：dedup_filter 成功输出 candidate_paper_ids，但 candidates 为空
+    # → 从 raw_candidates（executor 重建的完整元数据列表）匹配补全
+    if candidate_ids and not candidates:
+        raw_cands = list(output.get("raw_candidates") or [])
+        id_set = set(candidate_ids)
+        candidates = [c for c in raw_cands if str(c.get("pmid") or "").strip() in id_set]
+
+    # 兜底层 2：dedup_filter 未能输出 candidate_paper_ids
+    # → 从 raw_candidates 或 raw_candidate_ids 提取
     if not candidate_ids:
         raw_cands = list(output.get("raw_candidates") or [])
+        raw_ids   = list(output.get("raw_candidate_ids") or [])
+
         if raw_cands:
             seen: set[str] = set()
             for c in raw_cands:
@@ -399,11 +408,19 @@ def search_node(state: PipelineState) -> dict[str, Any]:
                     candidate_ids.append(pid)
                     candidates.append(c)
                     seen.add(pid)
-            if candidate_ids:
-                _trace_safe("search_fallback_extract", stage="search",
-                            payload={"fallback_count": len(candidate_ids),
-                                     "note": "从 raw_candidates 兜底提取"})
-                ok = True  # 有候选就认为 ok
+        elif raw_ids:
+            seen_ids: set[str] = set()
+            for pid in raw_ids:
+                pid = str(pid).strip()
+                if pid and pid not in seen_ids:
+                    candidate_ids.append(pid)
+                    seen_ids.add(pid)
+
+        if candidate_ids:
+            _trace_safe("search_fallback_extract", stage="search",
+                        payload={"fallback_count": len(candidate_ids),
+                                 "note": "从 raw_candidates/raw_candidate_ids 兜底提取"})
+            ok = True
     queries       = output.get("queries") or []
     query_strings = [q.get("query_string", "") for q in queries if q.get("query_string")]
 

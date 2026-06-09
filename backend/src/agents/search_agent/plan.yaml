@@ -86,76 +86,52 @@ steps:
       对上一步 query_build 输出的 queries 数组，逐条调用 pubmed_search 工具。
 
       执行规则：
-        - 每条检索式 max_results = 100
-        - 所有结果合并到同一列表
-        - 同一 PMID 重复出现时保留第一次结果（后续去重步骤处理）
+        - 每条检索式 max_results = 20（每条限 20 篇，控制总量）
         - 若某条检索式失败（status != ok），记录错误并继续下一条
 
-      合并后输出 JSON 格式：
+      ⚠️ 输出 token 受限，只输出以下精简 JSON（不要输出 candidates 完整内容）：
+
       {
-        "raw_candidates": [
-          {
-            "pmid":             "<PMID>",
-            "doi":              "<DOI 或 null>",
-            "title":            "<标题>",
-            "abstract":         "<摘要>",
-            "journal_title":    "<期刊名>",
-            "publication_year": <年份或 null>,
-            "authors":          ["<作者>"],
-            "source":           "pubmed",
-            "query_id":         "<来源检索式 ID>"
-          }
-        ],
+        "raw_candidate_ids": ["<PMID1>", "<PMID2>", ...],
         "search_stats": {
           "queries_executed": <int>,
           "queries_failed":   <int>,
           "raw_total":        <int>
         }
       }
+
+      raw_candidate_ids 包含所有检索到的 PMID（含跨检索式重复，后续步骤负责去重）。
     tools_required:
       - "pubmed_search"
     success_criteria:
       required_fields:
-        - "raw_candidates"
+        - "raw_candidate_ids"
         - "search_stats"
       min_count:
-        raw_candidates: 1
+        raw_candidate_ids: 1
     max_retries: 2
     db_write_policy: "none"
 
   - step_id: "dedup_filter"
     name: "去重与整理候选文献"
     instruction: |
-      你已在上一步（search_execute）获得了 raw_candidates 列表（参见「已完成步骤摘要及输出数据」中的 raw_candidates 字段）。
-      现在对这些 raw_candidates 按以下规则去重，输出最终候选文献列表。
+      在「已完成步骤摘要及输出数据」中查找 search_execute 步骤的输出数据，
+      从中提取 raw_candidate_ids（PMID 列表）或 raw_candidates 列表。
 
-      去重规则：
-        1. PMID 相同 → 保留第一次出现
-        2. DOI 相同（忽略大小写）→ 保留第一次出现
-        3. 标题前 80 字符相同（去空格、小写） → 保留第一次出现
+      任务：对上述 PMID 进行去重，输出不重复的候选 PMID 列表。
 
-      ⚠️ 重要：只输出以下 JSON，不要输出任何解释文字、前言或后记。
+      去重规则（只需基于 PMID，最简单且最可靠）：
+        - 同一 PMID 多次出现时，只保留一次
+
+      ⚠️ 重要：只输出以下 JSON，不要有任何解释或前言。
 
       ```json
       {
         "candidate_paper_ids": ["<PMID>", ...],
-        "candidates": [
-          {
-            "pmid":             "<PMID>",
-            "doi":              "<DOI 或 null>",
-            "title":            "<标题>",
-            "abstract":         "<摘要>",
-            "journal_title":    "<期刊名>",
-            "publication_year": <年份或 null>,
-            "authors":          ["<作者>"],
-            "source":           "pubmed"
-          }
-        ],
-        "search_summary": "<一句话摘要：执行了几条检索式，初始 N 篇，去重后 M 篇>",
+        "search_summary": "<一句话：执行了 N 条检索式，初始 M 篇，去重后 K 篇>",
         "search_stats": {
-          "queries_count":  <int>,
-          "total_raw":      <int>,
-          "after_dedup":    <int>
+          "total_raw":   <去重前数量>,
+          "after_dedup": <去重后数量>
         }
       }
       ```
@@ -163,7 +139,6 @@ steps:
     success_criteria:
       required_fields:
         - "candidate_paper_ids"
-        - "candidates"
         - "search_summary"
       min_count:
         candidate_paper_ids: 1
