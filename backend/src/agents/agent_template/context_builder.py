@@ -209,9 +209,25 @@ def _trim_item(item: Any, max_str_len: int = 150) -> Any:
 def _build_upstream_section(upstream_context: dict) -> str:
     """将上游 agent 的 PipelineState 片段格式化为「上游结果」段落。
 
-    v0.1：graph 层传入什么就格式化什么，不做深层解析。
+    列表值超过 20 条时显示总数 + 前 10 条预览，避免 token 爆炸。
     """
+    import json as _json
     lines = ["## 上游 Agent 输出（供参考）"]
     for key, value in upstream_context.items():
-        lines.append(f"- **{key}**：{value}")
+        if isinstance(value, list):
+            n = len(value)
+            if n > 20:
+                preview = value[:10]
+                lines.append(
+                    f"- **{key}**（共 {n} 条，仅展示前 10）：\n"
+                    f"  {_json.dumps(preview, ensure_ascii=False)}\n"
+                    f"  ...（余 {n - 10} 条已省略）"
+                )
+            else:
+                lines.append(
+                    f"- **{key}**（共 {n} 条）：\n"
+                    f"  {_json.dumps(value, ensure_ascii=False)}"
+                )
+        else:
+            lines.append(f"- **{key}**：{value}")
     return "\n".join(lines)

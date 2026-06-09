@@ -1,26 +1,37 @@
 # screen_agent/plan.yaml
 # ScreenAgent 的预定义 plan，两步式筛选→下载流程。
+# v0.2：screen_paper 工具改为接收 paper_ids（PMID 列表），内部自动获取元数据。
 
-plan_id: "screen_plan_v01"
+plan_id: "screen_plan_v02"
 agent_name: "screen_agent"
-version: "0.1"
+version: "0.2"
 
 steps:
   - step_id: "screen_papers"
     name: "文献相关性筛选"
     instruction: |
-      调用 screen_paper 工具，根据筛选标准对上游 search_agent 传入的候选文献进行相关性筛选。
+      在「上游 Agent 输出」中找到 candidate_paper_ids（候选文献 PMID 列表）。
 
-      筛选标准（criteria）：基于 identity.yaml 中的 objective 和 constraints 构造，
-      说明应保留什么样的文献（如：研究肽-矿物相互作用的原创实验研究，排除纯计算和综述）。
+      调用 screen_paper 工具，传入以下参数：
+        - paper_ids：candidate_paper_ids 中的所有 PMID（完整列表，不要遗漏）
+        - criteria：根据研究目标构造的筛选标准，例如：
+                   "原创实验研究，研究肽段与羟基磷灰石（HAp）或磷酸钙矿物的
+                   吸附/结合/矿化相互作用；排除纯计算模拟、综述和病例报告"
+                   可结合 refined_screening_criteria（若上游有提供）进一步细化。
+        - threshold：1.0（BM25 相关度阈值，使用默认值）
 
-      输出 JSON 格式（与工具返回一致）：
+      工具会自动从 PubMed 获取标题和摘要后执行 BM25 相关度筛选，无需你预先获取元数据。
+
+      ⚠️ 重要：只输出以下 JSON，不要有任何解释文字。
+
+      ```json
       {
         "screened_paper_ids": ["34265844", "38360817", ...],
         "screened_count": <int>,
         "excluded": [{"pmid": "12345678", "reason": "...", "relevance": 0.0123}, ...],
         "screen_summary": "根据标准筛选 N 篇文献，相关 M 篇，排除 K 篇。"
       }
+      ```
     tools_required:
       - "screen_paper"
     success_criteria:
@@ -35,20 +46,27 @@ steps:
   - step_id: "download_papers"
     name: "下载论文全文及补充材料"
     instruction: |
-      对每篇 screened_paper_ids，逐篇调用 download_paper 工具下载 PDF。
-      每次调用传入单篇文献的 pmid（和可选的 doi），同时传入当前 run_id。
+      在「已完成步骤摘要及输出数据」中找到 screen_papers 步骤输出的
+      screened_paper_ids 列表（这些是通过筛选的 PMID）。
+
+      对 screened_paper_ids 中的每一篇，逐篇调用 download_paper 工具：
+        - pmid：论文的 PubMed ID
+        - run_id：在「上游 Agent 输出」的 run_id 字段（若无则省略）
 
       失败（download_status == "failed"）时记录原因并继续下一篇，不中止流程。
-      对失败文献可重试一次（付费墙、PMID 无效等不可重试）。
+      尽可能多下载，目标 5-10 篇 OA 论文。
 
-      输出 JSON 格式：
+      ⚠️ 重要：只输出以下 JSON，不要有任何解释文字。
+
+      ```json
       {
         "download_results": [
           {"pmid": "34265844", "paper_key": "9f4c2a0d", "download_status": "downloaded"},
           {"pmid": "38360817", "paper_key": "a1b2c3d4", "download_status": "failed", "message": "付费墙限制"}
         ],
-        "download_summary": "共下载 N 篇，成功 M 篇，失败 K 篇。"
+        "download_summary": "共尝试下载 N 篇，成功 M 篇，失败 K 篇。"
       }
+      ```
     tools_required:
       - "download_paper"
     success_criteria:

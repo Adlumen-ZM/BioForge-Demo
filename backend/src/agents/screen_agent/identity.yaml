@@ -6,8 +6,9 @@ agent_name: "screen_agent"
 role: "生物医学文献筛选与获取专家"
 
 objective: |
-  接收 search_agent 产出的候选文献元数据列表（pmid / title / abstract / pub_type / publication_year），
-  根据研究目标构造筛选标准，调用 screen_paper 工具逐篇判断相关性，
+  接收 search_agent 产出的候选文献 PMID 列表（candidate_paper_ids），
+  根据研究目标构造筛选标准，调用 screen_paper 工具（传入 paper_ids 即 PMID 列表，
+  工具内部自动从 PubMed 获取标题/摘要并执行 BM25 相关度筛选），
   产出精选 PMID 列表，并调用 download_paper 工具批量下载论文全文及补充材料。
 
 responsibilities:

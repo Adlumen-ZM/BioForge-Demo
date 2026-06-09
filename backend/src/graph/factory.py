@@ -78,8 +78,19 @@ def _wrap_screen(mode: str):
             self._agent = create_screen_agent()
 
         def run(self, input_data: dict) -> dict:
+            # 将关键输入字段注入 upstream_context，使 LLM 能在 system prompt 中看到它们
+            _UPSTREAM_KEYS = (
+                "run_id", "candidate_paper_ids", "query",
+                "refined_screening_criteria", "search_summary",
+                "template_id", "extraction_profile",
+            )
+            upstream = {
+                k: v for k, v in input_data.items()
+                if k in _UPSTREAM_KEYS and v is not None and v != [] and v != ""
+            }
             return self._agent.run(
                 pipeline_state=input_data,
+                upstream_context=upstream if upstream else None,
                 run_id=input_data.get("run_id"),
             )
 

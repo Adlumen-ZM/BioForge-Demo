@@ -110,7 +110,9 @@ def run_step(
             )
             if reconstructed:
                 merged = dict(reconstructed)
-                merged.update({k: v for k, v in output.items() if k != "raw_output"})
+                # 防御性处理：output 可能为 list（LLM 输出了 JSON 数组而非对象）
+                if isinstance(output, dict):
+                    merged.update({k: v for k, v in output.items() if k != "raw_output"})
                 output = merged
 
         # ── 7. 生成 StepSummary（纯函数，不调 LLM）─────────────────────────
@@ -201,11 +203,13 @@ def _extract_output(text: str, step: PlanStep) -> dict[str, Any]:
       - 需要严格结构化输出时，可在此接入 instructor 库，
         使用 step.success_criteria 中的 schema 进行 schema binding。
     """
-    # 策略 1：提取 ```json 代码块
+    # 策略 1：提取 ```json 代码块（确保结果为 dict，避免 LLM 输出 list 导致 .items() 崩溃）
     json_block = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if json_block:
         try:
-            return json.loads(json_block.group(1).strip())
+            parsed = json.loads(json_block.group(1).strip())
+            if isinstance(parsed, dict):
+                return parsed
         except json.JSONDecodeError:
             pass
 
@@ -322,6 +326,9 @@ def _build_summary(output: dict[str, Any], step: PlanStep) -> StepSummary:
 
     key_numbers 提取规则：output 中值为 int/float/list（取 len）的字段。
     """
+    # 防御性处理：output 为非 dict（如 LLM 输出了 list）时使用空 dict
+    if not isinstance(output, dict):
+        output = {}
     key_numbers: dict[str, Any] = {}
     for k, v in output.items():
         if isinstance(v, (int, float)):
