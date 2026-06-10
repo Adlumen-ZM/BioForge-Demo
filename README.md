@@ -1,7 +1,12 @@
 # BioForge: Agentic Framework for Biomedical Literature Mining
 
 BioForge 是一个面向生物医学文献挖掘的多智能体框架。本 demo 版本以 HAp 结合肽段文献抽取任务 为示例，串联 Guide Agent、PubMed 检索、文献筛选、PDF 下载、RAG 抽取、业务 SQLite 写入和 Trace 记录等多模块，搭建了检索、筛选到抽取的全流程。
-**获取最新展示视频及使用截图:** BioForge-Video-and-Photo链接: https://pan.baidu.com/s/1oPC0cAVSq4jC_eADKjQHfg?pwd=nhfr 提取码: nhfr 
+
+## BioForge-Video-and-Photo
+**点击下方图片观看完整演示：**
+[![点击观看演示](https://img.youtube.com/vi/你的视频ID/maxresdefault.jpg)](https://www.youtube.com/watch?v=你的视频ID)
+
+**获取高清展示视频及更多使用截图:** 链接: https://pan.baidu.com/s/1oPC0cAVSq4jC_eADKjQHfg?pwd=nhfr 提取码: nhfr 
 
 主要运行链路：
 
