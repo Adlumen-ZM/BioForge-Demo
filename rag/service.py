@@ -239,7 +239,7 @@ class BioPaperRAGService:
         output_dir: str | None = None,
         template_id: str = "hap_peptide_v1",
         schema_template_path: str | None = None,
-        overwrite: bool = False,
+        overwrite: bool = True,
         paper_key: str | None = None,
     ) -> dict[str, Any]:
         """

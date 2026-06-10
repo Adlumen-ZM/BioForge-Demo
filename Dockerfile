@@ -1,76 +1,106 @@
-# ========== BioForge 环境镜像 v0.1.3 ==========
+# BioForge environment image.
 #
-# 变更说明（相比 0.1.2）：
-#   - 新增 sentence-transformers（BGE-M3 嵌入模型依赖）
-#   - 构建阶段预下载 BAAI/bge-m3 权重（~1.3 GB），烘焙进镜像，
-#     避免每次运行时从 HuggingFace 下载
-#   - HF_HOME=/hf_cache，运行阶段同步暴露该环境变量
-#
-# 镜像定位：环境镜像（environment image）
-#   - 只含 Python 依赖 + 预下载的模型权重
-#   - 业务代码（backend/、rag/、docs/）通过 volume 挂载，不打包进镜像
-#   - 更新代码无需重新 build 镜像
+# This image is used as an environment manager: project source code is mounted
+# at /app during development, while Python dependencies and BGE-M3 weights are
+# baked into the image for reproducible CLI/RAG runs.
 
-# ========== 第一阶段：构建阶段 ==========
 FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# 安装编译工具和系统依赖
-# libmupdf-dev: PyMuPDF / PDF 处理依赖
-# gcc / g++: 部分 Python 包需要编译
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libmupdf-dev \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 Python 依赖（含新增的 sentence-transformers）
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 预下载 BAAI/bge-m3 模型权重（~1.3 GB）
-# HF_HOME 设为固定路径，方便从 builder 阶段复制到 runtime 阶段
-# 如需使用国内镜像，在 build 时传入：--build-arg HF_ENDPOINT=https://hf-mirror.com
 ARG HF_ENDPOINT=https://huggingface.co
+ARG PYTORCH_VERSION=2.12.0
+
+ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/hf_cache
 ENV HUGGINGFACE_HUB_CACHE=/hf_cache/hub
 ENV TRANSFORMERS_CACHE=/hf_cache/hub
-ENV HUGGINGFACE_HUB_TOKEN=""
-RUN python -c "\
-import os; \
-os.environ['HF_ENDPOINT'] = '${HF_ENDPOINT}'; \
-from FlagEmbedding import BGEM3FlagModel; \
-BGEM3FlagModel('BAAI/bge-m3', use_fp16=False); \
-print('BGE-M3 FlagEmbedding load check complete')"
+ENV HF_ENDPOINT=${HF_ENDPOINT}
+ENV BGE_MODEL_DIR=BAAI/bge-m3
+ENV BGE_USE_FP16=false
 
-# ========== 第二阶段：运行阶段 ==========
-FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    build-essential \
+    git \
+    curl \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+# Install CPU PyTorch first. Without this, pip may resolve the default CUDA
+# wheel and pull many nvidia-* packages that are unnecessary for the demo CLI.
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        "torch==${PYTORCH_VERSION}" \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Fail the build early if the downloader/screen/RAG imports are incomplete.
+RUN python - <<'PY'
+import importlib
+
+modules = [
+    "Bio",
+    "metapub",
+    "paperscraper.pdf",
+    "pymed_paperscraper",
+    "eutils",
+    "rank_bm25",
+    "fitz",
+    "FlagEmbedding",
+    "chromadb",
+    "torch",
+    "transformers",
+    "sentence_transformers",
+]
+for name in modules:
+    importlib.import_module(name)
+print("BioForge dependency import smoke test passed")
+PY
+
+# Preload BGE-M3 with the same runtime loader used by rag/retrieval.
+RUN python - <<'PY'
+from FlagEmbedding import BGEM3FlagModel
+
+BGEM3FlagModel("BAAI/bge-m3", use_fp16=False)
+print("BGE-M3 FlagEmbedding load check complete")
+PY
+
+
+FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
-# 从构建阶段复制 Python 依赖
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# 从构建阶段复制预下载的 BGE-M3 模型权重
-COPY --from=builder /hf_cache /hf_cache
-
-# 加入 requirements.txt 便于后续比对版本
-COPY requirements.txt /app/requirements.txt
-
-# 创建必要目录（数据、PDF、结果）
-RUN mkdir -p /app/data /app/v0_1PDF /app/v0_1results
-
-# 设置默认环境变量
 ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/hf_cache
 ENV HUGGINGFACE_HUB_CACHE=/hf_cache/hub
 ENV TRANSFORMERS_CACHE=/hf_cache/hub
 ENV BGE_MODEL_DIR=BAAI/bge-m3
 ENV BGE_USE_FP16=false
+ENV RAG_USE_CHROMADB=false
+ENV RAGFLOW_CHUNK_METHOD=paper
+ENV RAGFLOW_POLL_TIMEOUT_SEC=600
+ENV RAG_MAX_ENTITIES_PER_PAPER=3
+ENV LLM_TIMEOUT_SEC=120
+ENV DATA_ROOT=/app/data
+ENV EXTRACTION_PROFILE=hap_peptide_v1
 ENV BIZ_DB_PATH=/app/data/hap_v01.db
 ENV TRACE_DB_PATH=/app/data/hap_trace.db
 
-# 默认命令（进入 Python 交互模式；实际使用通过 docker run 覆盖）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /hf_cache /hf_cache
+COPY requirements.txt /app/requirements.txt
+
+RUN mkdir -p /app/data /app/v0_1PDF /app/v0_1results
+
 CMD ["python"]
