@@ -43,7 +43,7 @@ class RunBioPaperPipelineInput(BaseModel):
         description="schema.yaml 的显式路径；None 时根据 template_id 自动推导。",
     )
     overwrite: bool = Field(
-        default=False,
+        default=True,
         description="False 时若 CSV 文件已存在则跳过（幂等）；True 时强制覆盖。",
     )
 

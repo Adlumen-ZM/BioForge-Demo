@@ -47,7 +47,7 @@ def run_bio_paper_extraction_pipeline(
     output_dir: str,
     template_id: str = "hap_peptide_v1",
     schema_template_path: str | None = None,
-    overwrite: bool = False,
+    overwrite: bool = True,
 ) -> dict:
     """
     对单篇生物矿化 / HAp 领域 PDF 执行端到端结构化抽取，输出五表 CSV。
@@ -73,7 +73,8 @@ def run_bio_paper_extraction_pipeline(
         output_dir=output_dir,
         template_id=template_id,
         schema_template_path=schema_template_path,
-        overwrite=overwrite,
+        # RAG 输出目录按 paper_key 固定复用；强制覆盖可避免旧的空 CSV 污染后续重跑。
+        overwrite=True,
     )
 
 

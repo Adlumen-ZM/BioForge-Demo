@@ -26,4 +26,3 @@ output_contract:
   csv_files: "dict，五张 CSV 文件的完整路径（paper / paper_entity_record / entity_component / record_function / function_assay_evidence）；失败时各值为 null"
   tables: "dict，各 CSV 表的行数统计 {table_name: {rows: int}}；失败时各 rows 为 0"
   extract_summary: "不超过 200 字的抽取过程摘要，说明成功行数或失败原因"
-  error: "工具返回的错误详情；成功时为 null"

@@ -208,6 +208,8 @@ def write_db_node(state: PipelineState) -> dict[str, Any]:
         extraction_profile=extraction_profile,
         run_id=run_id,
         paper_key=paper_key,
+        source_pdf_path=state.get("pdf_path"),
+        overwrite=True,
     )
 
     ok = result.get("status") == "ok"
@@ -519,7 +521,6 @@ def screen_node(state: PipelineState) -> dict[str, Any]:
             ],
         }
 
-    ok               = _is_ok(output)
     download_results = output.get("download_results") or []
 
     # 提取第一个成功下载的 PDF 作为 primary
@@ -527,6 +528,9 @@ def screen_node(state: PipelineState) -> dict[str, Any]:
         r for r in download_results
         if r.get("download_status") in ("downloaded", "already_exists")
     ]
+    # 下载是 best-effort：只要至少拿到一篇 PDF，后续 extract 就可以继续。
+    # AgentTemplate 的 plan 级 LLM 校验可能因部分失败而返回 failed，不能把它当作流水线硬错误。
+    ok = _is_ok(output) or bool(successful)
     first = successful[0] if successful else None
 
     paper_key   = output.get("paper_key")     or (first.get("paper_key")     if first else None)
@@ -622,9 +626,17 @@ def extract_node(state: PipelineState) -> dict[str, Any]:
         }
     )
 
-    ok            = _is_ok(output)
     rag_csv_dir   = output.get("rag_csv_dir") or output.get("output_dir")
     rag_csv_files = output.get("rag_csv_files") or output.get("csv_files")
+    required_csv_tables = {
+        "paper", "paper_entity_record", "entity_component",
+        "record_function", "function_assay_evidence",
+    }
+    tool_status_ok = output.get("status") == "ok"
+    csv_files_ok = bool(rag_csv_dir) and required_csv_tables.issubset((rag_csv_files or {}).keys())
+    # Extract 的业务成功以 RAG 工具和 CSV 产物为准；AgentTemplate 的 plan 级 LLM
+    # 自评可能因为 error=null 这类契约细节误判为 failed。
+    ok = _is_ok(output) or (tool_status_ok and csv_files_ok)
 
     csv_quality = output.get("csv_quality_status") or ("pass" if ok and rag_csv_files else "unknown")
 
