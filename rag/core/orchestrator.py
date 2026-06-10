@@ -30,6 +30,7 @@ from rag.extraction.llm_extractor import (
     ExtractionFormatError,
     PaperExtractor,
     _default_paper_meta,
+    _extract_json_text,
 )
 from rag.retrieval.bge_hybrid_retriever import BGEHybridRetriever
 
@@ -163,6 +164,15 @@ class PipelineOrchestrator:
             scout_chunk_ids = [c["chunk_id"] for c in scout_chunks]
             try:
                 entity_list = self._call_scout_llm(scout_context)
+                max_entities = int(os.getenv("RAG_MAX_ENTITIES_PER_PAPER", "3"))
+                if max_entities > 0 and len(entity_list) > max_entities:
+                    logger.warning(
+                        "[%s] Scout 发现 %d 个实体，仅处理前 %d 个",
+                        pdf_path,
+                        len(entity_list),
+                        max_entities,
+                    )
+                    entity_list = entity_list[:max_entities]
                 self._emit({
                     "paper_id":      paper_id,
                     "source_pdf":    pdf_path,
@@ -415,8 +425,9 @@ class PipelineOrchestrator:
             temperature=0.0,
         )
         raw = response.choices[0].message.content
+        self._scout_last_raw = raw
         logger.info("[DEBUG] Scout Raw: %s", raw)
-        data = json.loads(raw)
+        data = json.loads(_extract_json_text(raw))
 
         if isinstance(data, dict):
             for key in ("entities", "peptides", "materials", "names", "list", "results"):
@@ -445,6 +456,7 @@ class PipelineOrchestrator:
             self._scout_llm = openai.OpenAI(
                 api_key=self._scout_api_key or os.environ.get("OPENAI_API_KEY"),
                 base_url=self._scout_base_url,
+                timeout=float(os.getenv("LLM_TIMEOUT_SEC", "120")),
             )
         return self._scout_llm
 

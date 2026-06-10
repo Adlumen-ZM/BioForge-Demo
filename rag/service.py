@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,7 @@ class BioPaperRAGService:
         retrieval_top_k: int = 8,
         retrieval_threshold: float = 0.1,
         scout_model: str | None = None,
+        ragflow_chunk_method: str = "paper",
     ) -> None:
         # 保存配置；组件延迟初始化（首次调用时才创建，节省启动时间）
         self._ragflow_base_url = ragflow_base_url
@@ -124,6 +126,7 @@ class BioPaperRAGService:
         self._retrieval_top_k = retrieval_top_k
         self._retrieval_threshold = retrieval_threshold
         self._scout_model = scout_model or llm_model
+        self._ragflow_chunk_method = ragflow_chunk_method
 
         # 延迟加载的组件占位符（None = 尚未初始化）
         self._parser = None        # RAGFlowParser
@@ -161,12 +164,12 @@ class BioPaperRAGService:
                 BGEHybridRetriever,
             )
 
-            try:
+            if os.getenv("RAG_USE_CHROMADB", "false").lower() == "true":
                 import chromadb  # noqa: PLC0415
 
                 chroma_client: Any = chromadb.EphemeralClient()
-            except ImportError:
-                logger.warning("chromadb 未安装，回退到内存 collection 适配器")
+            else:
+                logger.info("使用内存 collection 适配器，避免 ChromaDB 默认 embedding 下载")
                 chroma_client = _InMemoryChromaClient()
 
             retriever = BGEHybridRetriever(
@@ -199,6 +202,36 @@ class BioPaperRAGService:
     # ------------------------------------------------------------------
     # 公开接口
     # ------------------------------------------------------------------
+
+    def _parse_id_for_path(self, pdf_path: str | Path) -> str:
+        """用 PDF 绝对路径生成稳定的解析缓存 ID。"""
+        abs_path = str(Path(pdf_path).resolve())
+        return hashlib.md5(abs_path.encode()).hexdigest()
+
+    def _chunk_cache_file(self, pdf_path: str | Path) -> Path:
+        return _CHUNK_CACHE_DIR / f"{self._parse_id_for_path(pdf_path)}.json"
+
+    def _load_or_parse_chunks(self, pdf_path: str | Path) -> list[dict[str, Any]]:
+        cache_file = self._chunk_cache_file(pdf_path)
+        if cache_file.exists():
+            chunks = json.loads(cache_file.read_text(encoding="utf-8"))
+            logger.info(
+                "parse chunks 命中缓存: %s (%d chunks)",
+                cache_file.stem,
+                len(chunks),
+            )
+            return chunks
+
+        parser = self._get_parser()
+        chunks = parser.parse(
+            str(Path(pdf_path).resolve()),
+            chunk_method=self._ragflow_chunk_method,
+        )
+        cache_file.write_text(
+            json.dumps(chunks, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        logger.info("parse chunks 完成并缓存: %s (%d chunks)", cache_file.stem, len(chunks))
+        return chunks
 
     def run_pipeline(
         self,
@@ -239,9 +272,8 @@ class BioPaperRAGService:
             - tables     : {table_name: {rows: n}}（同上）
         """
         try:
-            parser = self._get_parser()
+            chunks = self._load_or_parse_chunks(pdf_path)
             orchestrator = self._get_orchestrator()
-            chunks = parser.parse(pdf_path)
             raw = orchestrator.process_pdf(
                 pdf_path,
                 chunks,
@@ -305,22 +337,9 @@ class BioPaperRAGService:
             - chunk_count : 解析产生的 chunk 数量
         """
         try:
-            abs_path = str(Path(pdf_path).resolve())
             # parse_id = PDF 绝对路径的 md5，保证同一文件幂等
-            parse_id = hashlib.md5(abs_path.encode()).hexdigest()
-            cache_file = _CHUNK_CACHE_DIR / f"{parse_id}.json"
-
-            if cache_file.exists():
-                # 命中缓存，直接返回，不重复解析
-                chunks = json.loads(cache_file.read_text(encoding="utf-8"))
-                logger.info("parse_pdf 命中缓存: %s (%d chunks)", parse_id, len(chunks))
-            else:
-                parser = self._get_parser()
-                chunks = parser.parse(abs_path)  # 调用 RAGFlow deepdoc 解析
-                cache_file.write_text(
-                    json.dumps(chunks, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-                logger.info("parse_pdf 完成并缓存: %s (%d chunks)", parse_id, len(chunks))
+            parse_id = self._parse_id_for_path(pdf_path)
+            chunks = self._load_or_parse_chunks(pdf_path)
 
             return {
                 "status": "ok",

@@ -74,7 +74,7 @@ class RAGFlowParser:
     """
 
     POLL_INTERVAL_SEC: int = 3     # 与 test(2).py 保持一致
-    POLL_TIMEOUT_SEC:  int = 600   # 最长等待 10 分钟
+    POLL_TIMEOUT_SEC:  int = int(os.getenv("RAGFLOW_POLL_TIMEOUT_SEC", "600"))
     CHUNK_PAGE_SIZE:   int = 1024  # 与 test(2).py 保持一致
 
     def __init__(
