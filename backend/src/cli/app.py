@@ -29,17 +29,51 @@ Banner 设计（§10）：
 from __future__ import annotations
 
 import os
+import shlex
 from typing import Any
 
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.rule import Rule
+from rich.table import Table
 from rich.text import Text
 
 from backend.src.cli.system_check import run_system_check
 from backend.src.cli.session import CLISession
 
 console = Console()
+
+
+def _normalize_command_name(command_name: str) -> str:
+    """Normalize REPL command names while keeping displayed commands slash-prefixed."""
+    normalized = command_name.strip().lstrip("/").lower()
+    if normalized == "?":
+        return "?"
+    for dash in ("–", "—", "−"):
+        normalized = normalized.replace(dash, "-")
+
+    chars: list[str] = []
+    previous_was_separator = False
+    for char in normalized:
+        if char.isalnum():
+            chars.append(char)
+            previous_was_separator = False
+        elif not previous_was_separator:
+            chars.append("-")
+            previous_was_separator = True
+
+    return "".join(chars).strip("-")
+
+
+def _get_command_name(command_line: str) -> str:
+    """Return the normalized first token of a REPL command line."""
+    try:
+        parts = shlex.split(command_line)
+    except ValueError:
+        parts = command_line.split(maxsplit=1)
+    if not parts:
+        return ""
+    return _normalize_command_name(parts[0])
 
 
 _LOGO = r"""
@@ -123,7 +157,7 @@ def print_banner(results: list[dict]) -> None:
     content = Group(logo, helix, subtitle, divider, status)
     console.print()
     console.print(Panel(content, border_style="blue", padding=(0, 1)))
-    console.print("  [dim]输入 /help 查看命令  ·  /demo 一键体验  ·  /quit 退出[/dim]")
+    console.print("  [dim]输入 /help 查看命令  ·  /demo 一键体验  ·  /export-db 导出数据  ·  /quit 退出[/dim]")
     console.print()
 
 
@@ -177,13 +211,85 @@ def _run_demo(session: Any, console: Any) -> None:
             pass
 
 
+def _run_export_db(command: str, console: Any) -> None:
+    """Export the business SQLite database to the standard 5-table CSV layout."""
+    from backend.src.db_access.business import export_business_db_to_csv
+
+    try:
+        parts = shlex.split(command)
+    except ValueError as exc:
+        console.print(f"[red]Invalid command arguments: {exc}[/red]")
+        return
+
+    args = parts[1:]
+    if len(args) > 2:
+        console.print(
+            "[yellow]Usage:[/yellow]\n"
+            "  /export-db\n"
+            "  /export-db /app/data/hap_v01.db\n"
+            "  /export-db /app/data/hap_v01.db /app/output/my-export\n"
+            "[dim]The leading slash is optional: export-db also works.[/dim]"
+        )
+        return
+
+    db_path = args[0] if len(args) >= 1 else None
+    output_dir = args[1] if len(args) >= 2 else None
+
+    result = export_business_db_to_csv(db_path=db_path, output_dir=output_dir)
+    status = result.get("status")
+
+    if status == "error":
+        console.print(Panel(
+            f"[red]{result.get('error', 'Export failed')}[/red]\n\n"
+            f"DB: {result.get('db_path', '-')}\n"
+            f"Output: {result.get('output_dir', '-')}",
+            title="DB Export Failed",
+            border_style="red",
+        ))
+        return
+
+    table = Table(title="Business DB Export")
+    table.add_column("Table", style="cyan")
+    table.add_column("Rows", justify="right")
+    table.add_column("CSV")
+
+    tables_exported = result.get("tables_exported", {})
+    csv_files = result.get("csv_files", {})
+    for table_name, row_count in tables_exported.items():
+        table.add_row(table_name, str(row_count), csv_files.get(table_name, "-"))
+
+    console.print(Panel(
+        f"[green]Export status: {status}[/green]\n"
+        f"DB: {result.get('db_path', '-')}\n"
+        f"Output: {result.get('output_dir', '-')}",
+        title="DB Export Complete",
+        border_style="green" if status == "ok" else "yellow",
+    ))
+    console.print(table)
+
+    missing_tables = result.get("missing_tables") or []
+    errors = result.get("errors") or []
+    if missing_tables:
+        console.print(f"[yellow]Missing DB tables exported as empty CSVs: {', '.join(missing_tables)}[/yellow]")
+    if errors:
+        console.print("[yellow]Export warnings:[/yellow]")
+        for err in errors:
+            console.print(f"  - {err}")
+
+
 def _print_help() -> None:
     """打印 REPL 帮助信息。"""
     console.print(
-        "\n  [bold cyan]可用命令[/bold cyan]\n"
-        "   [yellow]/demo[/yellow]   — 启动 HAp 肽段文献挖掘 demo 流水线\n"
-        "   [yellow]/help[/yellow]   — 显示本帮助\n"
-        "   [yellow]/quit[/yellow]   — 退出\n"
+        "\n  [bold cyan]Available commands[/bold cyan]\n"
+        "   [yellow]/demo[/yellow]                       Run the HAp peptide literature mining demo\n"
+        "   [yellow]/export-db[/yellow] \\[db_path] \\[out]   Export a business DB to 5 CSV tables\n"
+        "   [yellow]/help[/yellow]                       Show this help message\n"
+        "   [yellow]/quit[/yellow]                       Exit\n"
+        "\n  [bold cyan]Export examples[/bold cyan]\n"
+        "   [yellow]/export-db[/yellow]\n"
+        "   [yellow]/export-db[/yellow] /app/data/hap_v01.db\n"
+        "   [yellow]/export-db[/yellow] /app/data/hap_v01.db /app/output/my-export\n"
+        "\n  [dim]The leading slash is optional, so demo/export-db/help/quit also work.[/dim]\n"
     )
 
 
@@ -205,7 +311,7 @@ def main():
     session = CLISession()
 
     # ── 步骤 3：REPL 命令循环 ─────────────────────────────────────────────────
-    console.print("  [dim]输入 [bold]/demo[/bold] 开始体验  ·  [bold]/help[/bold] 查看命令  ·  [bold]/quit[/bold] 退出[/dim]\n")
+    console.print("  [dim]输入 [bold]/demo[/bold] 开始体验  ·  [bold]/export-db[/bold] 导出数据  ·  [bold]/help[/bold] 查看命令  ·  [bold]/quit[/bold] 退出[/dim]\n")
 
     while True:
         try:
@@ -217,14 +323,19 @@ def main():
         if not cmd:
             continue
 
-        if cmd in ("/quit", "quit", "exit", "q"):
+        command_name = _get_command_name(cmd)
+
+        if command_name in ("quit", "exit", "q"):
             console.print("[dim]Goodbye.[/dim]")
             break
 
-        elif cmd in ("/help", "help", "/?"):
+        elif command_name in ("help", "?"):
             _print_help()
 
-        elif cmd in ("/demo", "demo"):
+        elif command_name in ("export-db", "export"):
+            _run_export_db(cmd, console)
+
+        elif command_name == "demo":
             try:
                 _run_demo(session, console)
             except KeyboardInterrupt:
@@ -236,10 +347,10 @@ def main():
                 session.add_history({"run_id": session.run_id or "?",
                                      "status": "error", "summary": str(e)})
             # demo 结束后回到 REPL
-            console.print("\n  [dim]输入 [bold]/demo[/bold] 再次运行  ·  [bold]/quit[/bold] 退出[/dim]\n")
+            console.print("\n  [dim]输入 [bold]/demo[/bold] 再次运行  ·  [bold]/export-db[/bold] 导出数据  ·  [bold]/quit[/bold] 退出[/dim]\n")
 
         else:
-            console.print(f"  [dim]未知命令：{cmd!r}。输入 /help 查看可用命令。[/dim]")
+            console.print(f"  [dim]未知命令：{cmd!r}。输入 /help 查看可用命令；命令前面的 / 可省略。[/dim]")
 
 
 if __name__ == "__main__":

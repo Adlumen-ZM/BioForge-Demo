@@ -4,7 +4,7 @@
 # at /app during development, while Python dependencies and BGE-M3 weights are
 # baked into the image for reproducible CLI/RAG runs.
 
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -19,11 +19,9 @@ ENV HF_ENDPOINT=${HF_ENDPOINT}
 ENV BGE_MODEL_DIR=BAAI/bge-m3
 ENV BGE_USE_FP16=false
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     ca-certificates \
-    build-essential \
-    git \
-    curl \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -69,7 +67,7 @@ print("BGE-M3 FlagEmbedding load check complete")
 PY
 
 
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim-bookworm AS runtime
 
 WORKDIR /app
 
@@ -89,10 +87,9 @@ ENV EXTRACTION_PROFILE=hap_peptide_v1
 ENV BIZ_DB_PATH=/app/data/hap_v01.db
 ENV TRACE_DB_PATH=/app/data/hap_trace.db
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     ca-certificates \
-    curl \
-    git \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 

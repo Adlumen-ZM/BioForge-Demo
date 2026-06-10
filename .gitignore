@@ -53,6 +53,7 @@ data/*
 
 v0_1PDF/
 v0_1results/
+output/
 
 # ====================
 # Database files

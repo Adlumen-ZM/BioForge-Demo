@@ -192,7 +192,11 @@ def _enrich_after_node(metrics: dict[str, NodeMetrics], node_name: str, state: d
         failed = len(dl) - len(ok_dl)
         m.detail = f"下载 {len(ok_dl)}/{len(dl)} 篇  失败 {failed}"
     elif node_name == "extract":
-        files = state.get("rag_csv_files") or {}
+        files = {
+            name: path
+            for name, path in (state.get("rag_csv_files") or {}).items()
+            if path
+        }
         q = state.get("csv_quality_status") or "?"
         m.detail = f"CSV {len(files)} 表  质量: {q}"
     elif node_name == "write_rag_csv_to_db":
@@ -237,7 +241,11 @@ def _print_summary(final_state: dict[str, Any]) -> None:
 
     # 🧬 提取
     rag_dir   = final_state.get("rag_csv_dir")
-    rag_files = final_state.get("rag_csv_files") or {}
+    rag_files = {
+        name: path
+        for name, path in (final_state.get("rag_csv_files") or {}).items()
+        if path
+    }
     quality   = final_state.get("csv_quality_status") or "—"
     text.append("\n  🧬 提取\n", style="bold cyan")
     text.append(f"     CSV 表：{len(rag_files)} 张  |  质量：{quality}\n", style="white")

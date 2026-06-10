@@ -627,7 +627,12 @@ def extract_node(state: PipelineState) -> dict[str, Any]:
     )
 
     rag_csv_dir   = output.get("rag_csv_dir") or output.get("output_dir")
-    rag_csv_files = output.get("rag_csv_files") or output.get("csv_files")
+    raw_csv_files = output.get("rag_csv_files") or output.get("csv_files") or {}
+    rag_csv_files = {
+        name: path
+        for name, path in raw_csv_files.items()
+        if path and Path(str(path)).exists()
+    }
     required_csv_tables = {
         "paper", "paper_entity_record", "entity_component",
         "record_function", "function_assay_evidence",
@@ -639,6 +644,7 @@ def extract_node(state: PipelineState) -> dict[str, Any]:
     ok = _is_ok(output) or (tool_status_ok and csv_files_ok)
 
     csv_quality = output.get("csv_quality_status") or ("pass" if ok and rag_csv_files else "unknown")
+    error_message = output.get("error") or output.get("message") or output.get("extract_summary") or ""
 
     _trace_safe(
         "extract_finished",
@@ -646,15 +652,16 @@ def extract_node(state: PipelineState) -> dict[str, Any]:
         status="success" if ok else "failed",
         payload={
             "rag_csv_dir":       rag_csv_dir,
-            "csv_table_count":   len(rag_csv_files) if rag_csv_files else 0,
+            "csv_table_count":   len(rag_csv_files),
             "csv_quality_status": csv_quality,
+            "error":             error_message if not ok else None,
         },
     )
 
     updates: dict[str, Any] = {
         "current_stage":        "done" if ok else "error",
         "ok":                   ok,
-        "message":              output.get("message") or output.get("extract_summary") or "",
+        "message":              error_message,
         "extracted_record_ids": list(output.get("extracted_record_ids") or []),
         "extract_summary":      output.get("extract_summary") or output.get("extract_agent_summary") or "",
         "extraction":           output.get("extraction"),

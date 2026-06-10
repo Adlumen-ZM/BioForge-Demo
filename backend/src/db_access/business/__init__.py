@@ -11,10 +11,12 @@
 from .init_service import ensure_business_db
 from .reader import get_paper_context, get_rag_extraction_contract
 from .csv_writer import write_rag_csv_to_business_db
+from .csv_exporter import export_business_db_to_csv
 
 __all__ = [
     "ensure_business_db",
     "get_rag_extraction_contract",
     "get_paper_context",
     "write_rag_csv_to_business_db",
+    "export_business_db_to_csv",
 ]
